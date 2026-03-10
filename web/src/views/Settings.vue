@@ -26,6 +26,16 @@ const passwordSaving = ref(false)
 const offlineSaving = ref(false)
 const offlineTesting = ref(false)
 const applyingDefaults = ref(false)
+const strategyCollapsed = ref(localStorage.getItem('settings_strategy_collapsed') === 'true')
+const automationCollapsed = ref(localStorage.getItem('settings_automation_collapsed') === 'true')
+
+watch(strategyCollapsed, (val) => {
+  localStorage.setItem('settings_strategy_collapsed', String(val))
+})
+
+watch(automationCollapsed, (val) => {
+  localStorage.setItem('settings_automation_collapsed', String(val))
+})
 
 const modalVisible = ref(false)
 const modalConfig = ref({
@@ -98,6 +108,7 @@ const localSettings = ref({
     skip_own_weed_bug: false,
     fertilizer_multi_season: false,
     fertilizer_land_types: [...allFertilizerLandTypes],
+    fertilizer_smart_seconds: 300,
   },
   fertilizerBuyType: 'inorganic',
   fertilizerBuyCount: 10,
@@ -152,6 +163,7 @@ function syncLocalSettings() {
         skip_own_weed_bug: false,
         fertilizer_multi_season: false,
         fertilizer_land_types: [...allFertilizerLandTypes],
+        fertilizer_smart_seconds: 300,
       }
     }
     else {
@@ -172,6 +184,7 @@ function syncLocalSettings() {
         skip_own_weed_bug: false,
         fertilizer_multi_season: false,
         fertilizer_land_types: [...allFertilizerLandTypes],
+        fertilizer_smart_seconds: 300,
       }
       localSettings.value.automation = {
         ...defaults,
@@ -179,6 +192,9 @@ function syncLocalSettings() {
       }
     }
     localSettings.value.automation.fertilizer_land_types = normalizeFertilizerLandTypes(localSettings.value.automation.fertilizer_land_types)
+    if (localSettings.value.automation.fertilizer_smart_seconds === undefined) {
+      localSettings.value.automation.fertilizer_smart_seconds = 300
+    }
     if (settings.value.offlineReminder) {
       localOffline.value = JSON.parse(JSON.stringify(settings.value.offlineReminder))
     }
@@ -474,17 +490,26 @@ async function handleTestOffline() {
 
     <div v-else class="grid grid-cols-1 mt-12 gap-4 text-sm lg:grid-cols-2">
       <div v-if="currentAccountId" class="card h-full flex flex-col rounded-lg bg-white shadow dark:bg-gray-800">
-        <div class="border-b bg-gray-50/50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/50">
-          <h3 class="flex items-center gap-2 text-base text-gray-900 font-bold dark:text-gray-100">
-            <div class="i-fas-cogs" />
-            策略设置
-            <span v-if="currentAccountName" class="ml-2 text-sm text-gray-500 font-normal dark:text-gray-400">
-              ({{ currentAccountName }})
-            </span>
+        <div
+          class="border-b bg-gray-50/50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/50 cursor-pointer select-none hover:bg-gray-100/50 dark:hover:bg-gray-700/50 transition-colors"
+          @click="strategyCollapsed = !strategyCollapsed"
+        >
+          <h3 class="flex items-center justify-between text-base text-gray-900 font-bold dark:text-gray-100">
+            <div class="flex items-center gap-2">
+              <div class="i-fas-cogs" />
+              策略设置
+              <span v-if="currentAccountName" class="ml-2 text-sm text-gray-500 font-normal dark:text-gray-400">
+                ({{ currentAccountName }})
+              </span>
+            </div>
+            <div
+              class="i-carbon-chevron-down text-gray-400 transition-transform duration-200"
+              :class="{ 'rotate-[-90deg]': strategyCollapsed }"
+            />
           </h3>
         </div>
 
-        <div class="p-4 space-y-3">
+        <div v-show="!strategyCollapsed" class="p-4 space-y-3">
           <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
             <BaseSelect
               v-model="localSettings.plantingStrategy"
@@ -600,14 +625,23 @@ async function handleTestOffline() {
           </div>
         </div>
 
-        <div class="border-b border-t bg-gray-50/50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/50">
-          <h3 class="flex items-center gap-2 text-base text-gray-900 font-bold dark:text-gray-100">
-            <div class="i-fas-toggle-on" />
-            自动控制
+        <div
+          class="border-b border-t bg-gray-50/50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/50 cursor-pointer select-none hover:bg-gray-100/50 dark:hover:bg-gray-700/50 transition-colors"
+          @click="automationCollapsed = !automationCollapsed"
+        >
+          <h3 class="flex items-center justify-between text-base text-gray-900 font-bold dark:text-gray-100">
+            <div class="flex items-center gap-2">
+              <div class="i-fas-toggle-on" />
+              自动控制
+            </div>
+            <div
+              class="i-carbon-chevron-down text-gray-400 transition-transform duration-200"
+              :class="{ 'rotate-[-90deg]': automationCollapsed }"
+            />
           </h3>
         </div>
 
-        <div class="flex-1 p-4 space-y-4">
+        <div v-show="!automationCollapsed" class="flex-1 p-4 space-y-4">
           <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
             <BaseSwitch v-model="localSettings.automation.farm" label="自动种植收获" />
             <BaseSwitch v-model="localSettings.automation.task" label="自动做任务" />
@@ -684,6 +718,19 @@ async function handleTestOffline() {
                   v-model="localSettings.automation.fertilizer_multi_season"
                   label="多季补肥"
               />
+            </div>
+            <div v-if="localSettings.automation.fertilizer === 'smart'" class="flex flex-wrap gap-4 rounded bg-amber-50 p-2 text-sm dark:bg-amber-900/20">
+              <BaseInput
+                  v-model.number="localSettings.automation.fertilizer_smart_seconds"
+                  label="快成熟判定秒数"
+                  type="number"
+                  min="30"
+                  max="3600"
+                  class="w-40"
+              />
+              <span class="flex items-end pb-2 text-xs text-gray-500 dark:text-gray-400">
+                距离成熟时间 ≤ 此秒数时施有机肥（默认300秒=5分钟）
+              </span>
             </div>
           </div>
         </div>

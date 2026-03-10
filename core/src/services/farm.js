@@ -162,11 +162,11 @@ function getOrganicFertilizerTargetsFromLands(lands) {
     return targets;
 }
 
-function getFastMatureLands(lands) {
+function getFastMatureLands(lands, thresholdSec = 300) {
     const list = Array.isArray(lands) ? lands : [];
     const targets = [];
     const nowSec = getServerTimeSec();
-    const FIVE_MINUTES_SEC = 5 * 60;
+    const threshold = Math.max(0, toNum(thresholdSec) || 300);
 
     for (const land of list) {
         if (!land || !land.unlocked) continue;
@@ -188,7 +188,7 @@ function getFastMatureLands(lands) {
 
         const timeToMature = matureBeginTime - nowSec;
 
-        if (timeToMature <= FIVE_MINUTES_SEC && timeToMature >= 0) {
+        if (timeToMature <= threshold && timeToMature >= 0) {
             if (Object.prototype.hasOwnProperty.call(plant, 'left_inorc_fert_times')) {
                 const leftTimes = toNum(plant.left_inorc_fert_times);
                 if (leftTimes <= 0) continue;
@@ -432,9 +432,10 @@ async function runFertilizerByConfig(plantedLands = [], options = {}) {
     }
     else if (fertilizerConfig === 'smart') {
         let organicTargets = [];
+        const smartSeconds = toNum(automation.fertilizer_smart_seconds) || 300;
         try {
             const latest = await getAllLands();
-            organicTargets = getFastMatureLands(latest && latest.lands);
+            organicTargets = getFastMatureLands(latest && latest.lands, smartSeconds);
         } catch (e) {
             logWarn('施肥', `获取全农场地块失败: ${e.message}`);
         }
