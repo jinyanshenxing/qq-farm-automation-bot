@@ -133,6 +133,8 @@ function createDataProvider(options) {
                 stealDelaySeconds: body.stealDelaySeconds,
                 plantOrderRandom: body.plantOrderRandom,
                 plantDelaySeconds: body.plantDelaySeconds,
+                fertilizerBuyType: body.fertilizerBuyType,
+                fertilizerBuyCount: body.fertilizerBuyCount,
             };
             store.applyConfigSnapshot(snapshot, { accountId });
             const rev = nextConfigRevision();
@@ -145,6 +147,8 @@ function createDataProvider(options) {
                 stealDelaySeconds: store.getStealDelaySeconds(accountId),
                 plantOrderRandom: store.getPlantOrderRandom(accountId),
                 plantDelaySeconds: store.getPlantDelaySeconds(accountId),
+                fertilizerBuyType: store.getFertilizerBuyType(accountId),
+                fertilizerBuyCount: store.getFertilizerBuyCount(accountId),
                 configRevision: rev,
             };
         },
