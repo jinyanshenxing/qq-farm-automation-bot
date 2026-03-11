@@ -71,13 +71,14 @@ export const useFriendStore = defineStore('friend', () => {
     }
   }
 
-  async function fetchFriends(accountId: string) {
+  async function fetchFriends(accountId: string, forceSync = false) {
     if (!accountId)
       return
     loading.value = true
     try {
       const res = await api.get('/api/friends', {
         headers: { 'x-account-id': accountId },
+        params: forceSync ? { forceSync: 'true' } : {},
       })
       if (res.data.ok) {
         friends.value = res.data.data || []
@@ -282,6 +283,24 @@ export const useFriendStore = defineStore('friend', () => {
     }
   }
 
+  async function removeUnsyncedKnownFriendGids(accountId: string, gids: number[]) {
+    if (!accountId || !gids || gids.length === 0)
+      return { ok: false, removedCount: 0 }
+    knownFriendSettingsSaving.value = true
+    try {
+      const res = await api.post('/api/friend-known-gids/batch-remove', { gids }, {
+        headers: { 'x-account-id': accountId },
+      })
+      if (res.data.ok) {
+        applyKnownFriendSettings(res.data.data)
+      }
+      return { ok: res.data.ok, removedCount: res.data.removedCount || 0 }
+    }
+    finally {
+      knownFriendSettingsSaving.value = false
+    }
+  }
+
   return {
     friends,
     loading,
@@ -307,5 +326,6 @@ export const useFriendStore = defineStore('friend', () => {
     addKnownFriendGid,
     removeKnownFriendGid,
     batchAddKnownFriendGids,
+    removeUnsyncedKnownFriendGids,
   }
 })

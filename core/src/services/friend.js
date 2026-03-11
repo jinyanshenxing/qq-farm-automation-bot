@@ -165,11 +165,12 @@ function syncKnownFriendGidsFromFriends(friends) {
 function getEffectiveKnownQqFriendGids() {
     const currentKnownGids = normalizeFriendGids(getKnownFriendGids());
     clearInvalidKnownFriendGidMarks(currentKnownGids);
+    const accountId = process.env.FARM_ACCOUNT_ID || '';
 
     const invalidGidSet = getInvalidKnownFriendGidSet();
     return normalizeFriendGids([
         ...currentKnownGids,
-        ...getFriendBlacklist(),
+        ...getFriendBlacklist(accountId),
     ]).filter(gid => !invalidGidSet.has(gid));
 }
 
@@ -179,6 +180,8 @@ async function syncKnownFriendGidsFromRecentVisitors(force = false) {
     if (!force && interval > 0 && now - lastVisitorGidSyncAt < interval) {
         return getEffectiveKnownQqFriendGids();
     }
+
+    const accountId = process.env.FARM_ACCOUNT_ID || '';
 
     try {
         const records = await getInteractRecords();
@@ -217,7 +220,7 @@ async function syncKnownFriendGidsFromRecentVisitors(force = false) {
         }
         return normalizeFriendGids([
             ...merged,
-            ...getFriendBlacklist(),
+            ...getFriendBlacklist(accountId),
         ]);
     } catch (e) {
         const retryMs = getKnownFriendGidSyncRetryMs();
@@ -315,7 +318,8 @@ function isInvalidFriendAccessError(error) {
 function addFriendToBlacklist(friendGid, friendName, reason = '') {
     const gid = toNum(friendGid);
     if (!gid) return false;
-    const currentList = getFriendBlacklist();
+    const accountId = process.env.FARM_ACCOUNT_ID || '';
+    const currentList = getFriendBlacklist(accountId);
     const current = Array.isArray(currentList) ? currentList : [];
     if (current.includes(gid)) return false;
 
@@ -440,10 +444,10 @@ function inFriendQuietHours(now = new Date()) {
 }
 
 // ============ 好友 API ============
-async function getAllFriends() {
+async function getAllFriends(forceSync = false) {
     const isQQ = CONFIG.platform === 'qq';
     if (isQQ) {
-        await syncKnownFriendGidsFromRecentVisitors();
+        await syncKnownFriendGidsFromRecentVisitors(forceSync);
         const friendsFromKnownGids = await fetchQqFriendsByKnownGids();
         if (friendsFromKnownGids.length > 0) {
             syncKnownFriendGidsFromFriends(friendsFromKnownGids);
@@ -852,13 +856,13 @@ function analyzeFriendLands(lands, myGid, friendName = '', options = {}) {
 /**
  * 获取好友列表 (供面板)
  */
-async function getFriendsList() {
+async function getFriendsList(forceSync = false) {
     try {
         log('好友', '开始获取好友列表', {
             module: 'friend',
             event: '获取好友列表',
         });
-        const reply = await getAllFriends();
+        const reply = await getAllFriends(forceSync);
         const friends = reply.game_friends || [];
         const state = getUserState();
         const result = friends
@@ -867,6 +871,8 @@ async function getFriendsList() {
                 gid: toNum(f.gid),
                 name: f.remark || f.name || `GID:${toNum(f.gid)}`,
                 avatarUrl: String(f.avatar_url || '').trim(),
+                level: toNum(f.level),
+                gold: toNum(f.gold),
                 plant: f.plant ? {
                     stealNum: toNum(f.plant.steal_plant_num),
                     dryNum: toNum(f.plant.dry_num),
@@ -1488,6 +1494,8 @@ async function visitFriendForHelp(friend, totalActions, myGid, accountId, ignore
 async function checkFriends(options = {}) {
     const state = getUserState();
     if (!isAutomationOn('friend')) return false;
+    
+    const accountId = process.env.FARM_ACCOUNT_ID || '';
 
     const helpEnabled = !!isAutomationOn('friend_help');
     const stealEnabled = !!isAutomationOn('friend_steal');
@@ -1517,7 +1525,7 @@ async function checkFriends(options = {}) {
             return false;
         }
 
-        const blacklist = new Set(getFriendBlacklist());
+        const blacklist = new Set(getFriendBlacklist(accountId));
 
         const stealFriends = [];
         const helpFriends = [];
@@ -1792,6 +1800,8 @@ async function runBadOnceOnStartup() {
         return;
     }
 
+    const accountId = process.env.FARM_ACCOUNT_ID || '';
+
     log('好友', '========== 启动时放虫放草开始 ==========', { module: 'friend', event: '启动放虫放草开始' });
 
     try {
@@ -1802,7 +1812,7 @@ async function runBadOnceOnStartup() {
             return;
         }
 
-        const blacklist = new Set(getFriendBlacklist());
+        const blacklist = new Set(getFriendBlacklist(accountId));
         const badFriends = [];
         const visitedGids = new Set();
 

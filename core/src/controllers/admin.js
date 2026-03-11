@@ -604,8 +604,10 @@ function startAdminServer(dataProvider) {
             return res.status(403).json({ ok: false, error: '无权访问此账号' });
         }
 
+        const forceSync = req.query.forceSync === 'true';
+
         try {
-            const data = await provider.getFriends(id);
+            const data = await provider.getFriends(id, forceSync);
             res.json({ ok: true, data });
         } catch (e) {
             handleApiError(res, e);
@@ -882,6 +884,41 @@ function startAdminServer(dataProvider) {
                 ok: true, 
                 data: buildKnownFriendGidSettings(id),
                 addedCount,
+            });
+        } catch (e) {
+            return handleApiError(res, e);
+        }
+    });
+
+    // 批量删除未同步的好友GID
+    app.post('/api/friend-known-gids/batch-remove', (req, res) => {
+        const id = getAccId(req);
+        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
+
+        // 检查权限
+        if (!checkAccountAccess(req, id)) {
+            return res.status(403).json({ ok: false, error: '无权访问此账号' });
+        }
+
+        const gids = (req.body || {}).gids;
+        if (!Array.isArray(gids) || gids.length === 0) {
+            return res.json({ ok: true, data: buildKnownFriendGidSettings(id), removedCount: 0 });
+        }
+
+        try {
+            const current = store.getKnownFriendGids ? store.getKnownFriendGids(id) : [];
+            const removeSet = new Set(gids.map(Number).filter(n => Number.isFinite(n) && n > 0));
+            const next = current.filter(gid => !removeSet.has(Number(gid)));
+            const removedCount = current.length - next.length;
+
+            if (removedCount > 0 && store.setKnownFriendGids) {
+                store.setKnownFriendGids(id, next);
+            }
+
+            return res.json({ 
+                ok: true, 
+                data: buildKnownFriendGidSettings(id),
+                removedCount,
             });
         } catch (e) {
             return handleApiError(res, e);
