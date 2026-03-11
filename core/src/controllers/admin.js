@@ -843,6 +843,51 @@ function startAdminServer(dataProvider) {
         }
     });
 
+    // 批量添加好友GID
+    app.post('/api/friend-known-gids/batch-add', (req, res) => {
+        const id = getAccId(req);
+        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
+
+        // 检查权限
+        if (!checkAccountAccess(req, id)) {
+            return res.status(403).json({ ok: false, error: '无权访问此账号' });
+        }
+
+        const gids = (req.body || {}).gids;
+        if (!Array.isArray(gids) || gids.length === 0) {
+            return res.status(400).json({ ok: false, error: 'GID 列表无效' });
+        }
+
+        try {
+            const current = store.getKnownFriendGids ? store.getKnownFriendGids(id) : [];
+            const currentSet = new Set(current.map(Number));
+            let addedCount = 0;
+            for (const gid of gids) {
+                const num = Number(gid);
+                if (!Number.isFinite(num) || num <= 0) continue;
+                if (!currentSet.has(num)) {
+                    currentSet.add(num);
+                    addedCount++;
+                }
+            }
+            const next = Array.from(currentSet);
+            if (store.setKnownFriendGids) {
+                store.setKnownFriendGids(id, next);
+            }
+            // 同步配置到 worker 进程
+            if (provider && typeof provider.broadcastConfig === 'function') {
+                provider.broadcastConfig(id);
+            }
+            return res.json({ 
+                ok: true, 
+                data: buildKnownFriendGidSettings(id),
+                addedCount,
+            });
+        } catch (e) {
+            return handleApiError(res, e);
+        }
+    });
+
     // API: 蔬菜黑名单
     app.get('/api/plant-blacklist', authRequired, (req, res) => {
         try {

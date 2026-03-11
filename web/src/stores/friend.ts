@@ -264,6 +264,24 @@ export const useFriendStore = defineStore('friend', () => {
     }
   }
 
+  async function batchAddKnownFriendGids(accountId: string, gids: number[]) {
+    if (!accountId || !gids || gids.length === 0)
+      return { ok: false, addedCount: 0 }
+    knownFriendSettingsSaving.value = true
+    try {
+      const res = await api.post('/api/friend-known-gids/batch-add', { gids }, {
+        headers: { 'x-account-id': accountId },
+      })
+      if (res.data.ok) {
+        applyKnownFriendSettings(res.data.data)
+      }
+      return { ok: res.data.ok, addedCount: res.data.addedCount || 0 }
+    }
+    finally {
+      knownFriendSettingsSaving.value = false
+    }
+  }
+
   return {
     friends,
     loading,
@@ -288,5 +306,6 @@ export const useFriendStore = defineStore('friend', () => {
     saveKnownFriendSettings,
     addKnownFriendGid,
     removeKnownFriendGid,
+    batchAddKnownFriendGids,
   }
 })

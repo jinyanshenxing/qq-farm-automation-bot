@@ -124,6 +124,8 @@ let accountFallbackConfig = {
     automation: { ...DEFAULT_ACCOUNT_CONFIG.automation, fertilizer_land_types: [...DEFAULT_FERTILIZER_LAND_TYPES] },
     intervals: { ...DEFAULT_ACCOUNT_CONFIG.intervals },
     friendQuietHours: { ...DEFAULT_ACCOUNT_CONFIG.friendQuietHours },
+    knownFriendGids: [],
+    knownFriendGidSyncCooldownSec: DEFAULT_KNOWN_FRIEND_GID_SYNC_COOLDOWN_SEC,
 };
 
 const globalConfig = {
@@ -738,12 +740,12 @@ function getKnownFriendGidSyncCooldownSec(accountId) {
 
 function setKnownFriendGidSyncCooldownSec(accountId, sec) {
     const current = getAccountConfigSnapshot(accountId);
-    const next = normalizeAccountConfig(current, accountFallbackConfig);
-    next.knownFriendGidSyncCooldownSec = normalizeKnownFriendGidSyncCooldownSec(
-        sec,
-        next.knownFriendGidSyncCooldownSec,
-    );
-    setAccountConfigSnapshot(accountId, next);
+    const normalized = normalizeKnownFriendGidSyncCooldownSec(sec, current.knownFriendGidSyncCooldownSec);
+    const next = normalizeAccountConfig({
+        ...current,
+        knownFriendGidSyncCooldownSec: normalized,
+    }, accountFallbackConfig);
+    setAccountConfigSnapshot(accountId, next, true);
     return next.knownFriendGidSyncCooldownSec;
 }
 

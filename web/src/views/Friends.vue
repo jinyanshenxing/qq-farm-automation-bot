@@ -59,6 +59,8 @@ const searchKeyword = ref('')
 const batchLoading = ref(false)
 const newKnownFriendGid = ref('')
 const localKnownFriendGidSyncCooldownSec = ref(600)
+const showBatchAddGidModal = ref(false)
+const batchGidInput = ref('')
 
 const interactFilter = ref('all')
 const interactFilters = [
@@ -415,6 +417,36 @@ async function handleSaveKnownFriendSettings() {
 watch(knownFriendGidSyncCooldownSec, (val) => {
   localKnownFriendGidSyncCooldownSec.value = val
 })
+
+function parseBatchGids(input: string): number[] {
+  const text = String(input || '').trim()
+  if (!text) return []
+  const gids: number[] = []
+  const parts = text.split(/[\n,，\s]+/).map(s => s.trim()).filter(Boolean)
+  for (const part of parts) {
+    const num = Number.parseInt(part, 10)
+    if (Number.isFinite(num) && num > 0 && !gids.includes(num)) {
+      gids.push(num)
+    }
+  }
+  return gids
+}
+
+async function handleBatchAddKnownFriendGids() {
+  if (!currentAccountId.value) return
+  const gids = parseBatchGids(batchGidInput.value)
+  if (gids.length === 0) {
+    toast.error('请输入有效的 GID 列表')
+    return
+  }
+  const result = await friendStore.batchAddKnownFriendGids(currentAccountId.value, gids)
+  if (result.ok) {
+    batchGidInput.value = ''
+    showBatchAddGidModal.value = false
+    await refreshFriendsAfterKnownGidChange()
+    toast.success(`已批量添加 ${result.addedCount} 个 GID`)
+  }
+}
 </script>
 
 <template>
@@ -530,6 +562,12 @@ watch(knownFriendGidSyncCooldownSec, (val) => {
               >
                 <div v-if="knownFriendSettingsSaving" class="i-svg-spinners-90-ring-with-bg mr-1 inline-block align-text-bottom" />
                 保存设置
+              </button>
+              <button
+                class="rounded bg-blue-100 px-3 py-1.5 text-sm text-blue-700 transition dark:bg-blue-900/30 hover:bg-blue-200 dark:text-blue-400 disabled:opacity-50 dark:hover:bg-blue-900/50"
+                @click="showBatchAddGidModal = true"
+              >
+                批量新增 GID
               </button>
             </div>
           </div>
@@ -832,5 +870,44 @@ watch(knownFriendGidSyncCooldownSec, (val) => {
       @confirm="onConfirm"
       @cancel="!confirmLoading && (showConfirm = false)"
     />
+
+    <Teleport to="body">
+      <div
+        v-if="showBatchAddGidModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        @click.self="showBatchAddGidModal = false"
+      >
+        <div class="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+          <h3 class="mb-4 text-lg text-gray-800 font-semibold dark:text-gray-100">
+            批量新增 GID
+          </h3>
+          <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">
+            支持一行一个或用逗号/空格分隔，自动去重
+          </p>
+          <textarea
+            v-model="batchGidInput"
+            rows="8"
+            placeholder="每行一个 GID，或用逗号、空格分隔&#10;例如：&#10;12345678&#10;87654321&#10;或&#10;12345678, 87654321, 11111111"
+            class="mb-4 w-full border border-gray-300 rounded-lg bg-white p-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <div class="flex justify-end gap-3">
+            <button
+              class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              @click="showBatchAddGidModal = false"
+            >
+              取消
+            </button>
+            <button
+              class="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white transition hover:bg-blue-600 disabled:opacity-50"
+              :disabled="knownFriendSettingsSaving || !batchGidInput.trim()"
+              @click="handleBatchAddKnownFriendGids"
+            >
+              <div v-if="knownFriendSettingsSaving" class="i-svg-spinners-90-ring-with-bg mr-1 inline-block align-text-bottom" />
+              确认添加
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>

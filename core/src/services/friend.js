@@ -1356,33 +1356,12 @@ async function visitFriendForSteal(friend, totalActions, myGid, accountId) {
     });
 
     if (hasStealableBeforeFilter && status.stealable.length === 0) {
-        log('好友', `${name}: 跳过，所有可偷蔬菜都被黑名单过滤`, {
-            module: 'friend', event: '偷菜全部过滤', friendName: name, friendGid: gid
-        });
+        // log('好友', `${name}: 跳过，所有可偷蔬菜都被黑名单过滤`, {
+        //     module: 'friend', event: '偷菜全部过滤', friendName: name, friendGid: gid
+        // });
         await leaveFriendFarm(gid);
         return;
     }
-
-    // // 记录被过滤的数量（只统计成熟的、可偷的植物）
-    // const filteredCount = lands.filter(land => {
-    //     const plant = land.plant;
-    //     if (!plant || !plant.phases || plant.phases.length === 0) return false;
-    //     const currentPhase = getCurrentPhase(land.plant.phases, false);
-    //     if (!currentPhase || currentPhase.phase !== PlantPhase.MATURE) return false;
-    //     if (!plant.stealable) return false;
-    //     const stealInfo = plant.steal_player;
-    //     if (!stealInfo || stealInfo.length === 0) return true;
-    //     const mySteal = stealInfo.find(s => toNum(s.gid) === myGid);
-    //     const stealCount = mySteal ? toNum(mySteal.num) : 0;
-    //     const maxSteal = toNum(plant.steal_num, 2);
-    //     return stealCount < maxSteal;
-    // }).length - status.stealable.length;
-
-    // if (filteredCount > 0) {
-    //     log('好友', `${name}: ${filteredCount}个蔬菜被黑名单过滤，实际可偷${status.stealable.length}个`, {
-    //         module: 'friend', event: '偷菜部分过滤', friendName: name, friendGid: gid, filteredCount, stealableCount: status.stealable.length
-    //     });
-    // }
 
     // 只执行偷菜
     if (status.stealable.length > 0) {
