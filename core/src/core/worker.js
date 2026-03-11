@@ -606,7 +606,7 @@ async function handleApiCall(msg) {
                 result = await getLandsDetail();
                 break;
             case 'getFriends':
-                result = await getFriendsList();
+                result = await getFriendsList(args[0] === true);
                 break;
             case 'getInteractRecords':
                 result = await getInteractRecords();

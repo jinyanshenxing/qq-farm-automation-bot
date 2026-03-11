@@ -19,7 +19,7 @@ const PUSHOO_CHANNELS = new Set([
 const DEFAULT_FERTILIZER_LAND_TYPES = ['gold', 'black', 'red', 'normal'];
 const FERTILIZER_LAND_TYPE_SET = new Set(DEFAULT_FERTILIZER_LAND_TYPES);
 const INTERVAL_MAX_SEC = 86400;
-const DEFAULT_KNOWN_FRIEND_GID_SYNC_COOLDOWN_SEC = 600;
+const DEFAULT_KNOWN_FRIEND_GID_SYNC_COOLDOWN_SEC = 300;
 
 function normalizeKnownFriendGids(input, fallback = []) {
     const source = Array.isArray(input) ? input : fallback;
@@ -761,6 +761,16 @@ function setFriendBlacklist(accountId, list) {
     return [...next.friendBlacklist];
 }
 
+function addFriendToBlacklist(accountId, gid) {
+    const gidNum = Number(gid);
+    if (!gidNum || gidNum <= 0) return false;
+    const current = getFriendBlacklist(accountId);
+    if (current.includes(gidNum)) return false;
+    const newList = [...current, gidNum];
+    setFriendBlacklist(accountId, newList);
+    return true;
+}
+
 // ============ 偷取延迟 ============
 function getStealDelaySeconds(accountId) {
     return Math.max(0, Math.min(300, Number(getAccountConfigSnapshot(accountId).stealDelaySeconds) || 0));
@@ -1016,6 +1026,7 @@ module.exports = {
     setKnownFriendGidSyncCooldownSec,
     getFriendBlacklist,
     setFriendBlacklist,
+    addFriendToBlacklist,
     getStealDelaySeconds,
     getPlantOrderRandom,
     getPlantDelaySeconds,

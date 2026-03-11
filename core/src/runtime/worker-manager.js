@@ -307,6 +307,24 @@ function createWorkerManager(options) {
                 else req.resolve(result);
                 worker.requests.delete(id);
             }
+        } else if (msg.type === 'friend_blacklist_add') {
+            const gid = Number(msg.gid) || 0;
+            if (gid > 0) {
+                const { addFriendToBlacklist: addToBlacklist } = require('../models/store');
+                addToBlacklist(accountId, gid);
+                log('好友', `已将好友 ${msg.friendName || `GID:${gid}`} 加入黑名单`, {
+                    accountId: String(accountId),
+                    accountName: worker.name,
+                    friendGid: gid,
+                    friendName: msg.friendName,
+                    reason: msg.reason,
+                });
+                // 同步配置到 worker 进程
+                const worker_process = workers[accountId];
+                if (worker_process && worker_process.process) {
+                    worker_process.process.send({ type: 'config_sync', config: buildConfigSnapshotForAccount(accountId) });
+                }
+            }
         }
     }
 
