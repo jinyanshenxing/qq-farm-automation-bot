@@ -14,6 +14,15 @@ const { types } = require('./proto');
 const { toLong, toNum, syncServerTime, log, logWarn } = require('./utils');
 const cryptoWasm = require('./crypto-wasm');
 
+// 延迟加载 warehouse 模块避免循环依赖
+let warehouseModule = null;
+function getWarehouseModule() {
+    if (!warehouseModule) {
+        warehouseModule = require('../services/warehouse');
+    }
+    return warehouseModule;
+}
+
 // ============ 事件发射器 (用于推送通知) ============
 const networkEvents = new EventEmitter();
 
@@ -57,6 +66,27 @@ function setWsErrorState(code, message) {
 function clearWsErrorState() {
     wsErrorState = { code: 0, at: 0, message: '' };
 }
+
+// 登录后从背包获取金豆豆数量
+async function fetchGoldBeanFromBag() {
+    try {
+        const warehouse = getWarehouseModule();
+        const bagReply = await warehouse.getBag();
+        const items = warehouse.getBagItems(bagReply);
+        for (const item of (items || [])) {
+            const id = toNum(item && item.id);
+            const count = toNum(item && item.count);
+            if (id === 1005 && count > 0) {
+                userState.goldBean = count;
+                log('系统', `金豆豆数量: ${count}`);
+                break;
+            }
+        }
+    } catch (e) {
+        // 忽略获取失败
+    }
+}
+
 function hasOwn(obj, key) {
     return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 }
@@ -425,6 +455,10 @@ async function sendLogin(onLoginSuccess) {
                 }
                 console.warn('===============================');
                 console.warn('');
+
+                // 登录后主动获取背包中的金豆豆数量
+                fetchGoldBeanFromBag();
+
             }
 
             startHeartbeat();

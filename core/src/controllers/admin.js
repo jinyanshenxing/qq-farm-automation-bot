@@ -253,24 +253,8 @@ function startAdminServer(dataProvider) {
             });
         }
 
-        // 兼容旧版：仅密码登录（管理员）
-        const input = String(password || '');
-        const storedHash = store.getAdminPasswordHash ? store.getAdminPasswordHash() : '';
-        let ok = false;
-        if (storedHash) {
-            ok = hashPassword(input) === storedHash;
-        } else {
-            ok = input === String(CONFIG.adminPassword || '');
-        }
-        if (!ok) {
-            return res.status(401).json({ ok: false, error: 'Invalid password' });
-        }
-        const token = issueToken();
-        tokens.add(token);
-        // 旧版登录也创建用户对象（管理员）
-        const adminUser = { username: 'admin', role: 'admin', card: null, accountLimit: -1 };
-        tokenUserMap.set(token, adminUser);
-        res.json({ ok: true, data: { token, role: 'admin', card: null, accountLimit: -1, user: { username: 'admin' } } });
+        // 必须同时提供用户名和密码
+        return res.status(401).json({ ok: false, error: '请输入用户名和密码' });
     });
 
     // 注册接口
@@ -609,6 +593,24 @@ function startAdminServer(dataProvider) {
         try {
             const data = await provider.getFriends(id, forceSync);
             res.json({ ok: true, data });
+        } catch (e) {
+            handleApiError(res, e);
+        }
+    });
+
+    // 清除好友列表缓存
+    app.post('/api/friends/clear-cache', async (req, res) => {
+        const id = getAccId(req);
+        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
+
+        // 检查权限
+        if (!checkAccountAccess(req, id)) {
+            return res.status(403).json({ ok: false, error: '无权访问此账号' });
+        }
+
+        try {
+            await provider.clearFriendsCache(id);
+            res.json({ ok: true });
         } catch (e) {
             handleApiError(res, e);
         }

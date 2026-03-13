@@ -59,8 +59,17 @@ const confirmModal = ref({
   message: '',
   type: 'primary' as 'primary' | 'danger',
   loading: false,
-  action: '' as 'sell' | 'use',
+  action: '' as 'sell' | 'use' | 'batchSell',
   item: null as any,
+  selectedItems: [] as any[],
+})
+
+const batchMode = ref(false)
+const selectedForBatch = ref<Set<number>>(new Set())
+const batchSellResult = ref<{ gold: number, goldBean: number } | null>(null)
+
+const selectedSellableCount = computed(() => {
+  return selectedForBatch.value.size
 })
 
 function getPriceClass(item: any) {
@@ -77,16 +86,29 @@ function canSell(item: any) {
   return itemType === 17 || itemType === 5 || itemType === 6
 }
 
+function canBatchSell(item: any) {
+  return canSell(item) && Number(item.count || 0) > 0
+}
+
 function canUse(item: any) {
   const itemType = Number(item?.itemType || 0)
   return itemType === 11
 }
 
 function handleSellClick(item: any) {
+  if (batchMode.value) {
+    const isSelected = selectedForBatch.value.has(Number(item.id))
+    if (isSelected) {
+      selectedForBatch.value.delete(Number(item.id))
+    } else {
+      selectedForBatch.value.add(Number(item.id))
+    }
+    return
+  }
   const totalPrice = (Number(item.count) || 0) * (Number(item.price) || 0)
   const priceUnit = item.priceUnit || '金'
   const messages = [
-    `确定要出售全部${item.name || `物品${item.id}`}吗？`,
+    `确定要出售全部${item.name || `物品${item.id}`}吗?`,
     `数量：${item.count || 0}`,
   ]
   if (totalPrice > 0) {
@@ -100,6 +122,7 @@ function handleSellClick(item: any) {
     loading: false,
     action: 'sell',
     item,
+    selectedItems: [],
   }
 }
 
@@ -107,21 +130,22 @@ function handleUseClick(item: any) {
   confirmModal.value = {
     show: true,
     title: '确认使用',
-    message: `确定要使用全部 ${item.name || `物品${item.id}`} 吗？\n数量：${item.count || 0}`,
+    message: `确定要使用全部 ${item.name || `物品${item.id}`} 吗?\n数量：${item.count || 0}`,
     type: 'primary',
     loading: false,
     action: 'use',
     item,
+    selectedItems: [],
   }
 }
 
 async function handleConfirm() {
-  const { action, item } = confirmModal.value
-  if (!item || !currentAccountId.value) return
+  const { action, item, selectedItems } = confirmModal.value
+  if (!currentAccountId.value) return
 
   confirmModal.value.loading = true
   try {
-    if (action === 'sell') {
+    if (action === 'sell' && item) {
       const sellItems = originalItems.value
         .filter((it: any) => Number(it.id) === Number(item.id))
         .map((it: any) => ({ id: it.id, count: it.count, uid: it.uid || 0 }))
@@ -138,7 +162,42 @@ async function handleConfirm() {
       } else {
         toastStore.error(`出售失败: ${res.error || '未知错误'}`)
       }
-    } else if (action === 'use') {
+    } else if (action === 'batchSell' && selectedItems) {
+      const itemsToSell = originalItems.value
+        .filter((it: any) => selectedItems.some((si: any) => Number(si.id) === Number(it.id)))
+        .map((it: any) => ({ id: it.id, count: it.count, uid: it.uid || 0 }))
+      
+      if (itemsToSell.length === 0) {
+        toastStore.error('未找到可出售的物品')
+        return
+      }
+
+      const res = await bagStore.sellItems(currentAccountId.value, itemsToSell)
+      if (res.ok) {
+        let totalGold = 0
+        let totalGoldBean = 0
+        for (const si of selectedItems) {
+          const fi = filteredItems.value.find((f: any) => Number(f.id) === Number(si.id))
+          if (fi) {
+            const price = Number(fi.price) || 0
+            const count = Number(fi.count) || 0
+            const priceId = Number(fi.priceId) || 0
+            if (priceId === 1005) {
+              totalGoldBean += price * count
+            } else {
+              totalGold += price * count
+            }
+          }
+        }
+        batchSellResult.value = { gold: totalGold, goldBean: totalGoldBean }
+        toastStore.success(`已批量出售 ${selectedItems.length} 种物品，获得 ${totalGold} 金币, ${totalGoldBean} 金豆豆`)
+        selectedForBatch.value.clear()
+        batchMode.value = false
+        await loadBag()
+      } else {
+        toastStore.error(`批量出售失败: ${res.error || '未知错误'}`)
+      }
+    } else if (action === 'use' && item) {
       const res = await bagStore.useItem(currentAccountId.value, Number(item.id), Number(item.count || 1))
       if (res.ok) {
         toastStore.success(`已使用 ${item.name || `物品${item.id}`}`)
@@ -157,6 +216,77 @@ async function handleConfirm() {
 
 function handleCancel() {
   confirmModal.value.show = false
+}
+
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) {
+    selectedForBatch.value.clear()
+    batchSellResult.value = null
+  }
+}
+
+function selectAllSellable() {
+  selectedForBatch.value.clear()
+  for (const item of filteredItems.value) {
+    if (canBatchSell(item)) {
+      selectedForBatch.value.add(Number(item.id))
+    }
+  }
+}
+
+function handleBatchSellClick() {
+  const sellableItems = filteredItems.value.filter((item: any) => canBatchSell(item))
+  if (sellableItems.length === 0) {
+    toastStore.warning('没有可批量出售的物品')
+    return
+  }
+  const selectedList = Array.from(selectedForBatch.value)
+  if (selectedList.length === 0) {
+    toastStore.warning('请先选择要出售的物品')
+    return
+  }
+  
+  const itemsToSell = originalItems.value
+    .filter((it: any) => selectedList.includes(Number(it.id)))
+    .map((it: any) => ({ id: it.id, count: it.count, uid: it.uid || 0 }))
+
+  let totalGold = 0
+  let totalGoldBean = 0
+  for (const it of itemsToSell) {
+    const item = filteredItems.value.find((f: any) => Number(f.id) === Number(it.id))
+    if (item) {
+      const price = Number(item.price) || 0
+      const count = Number(item.count) || 0
+      const priceId = Number(item.priceId) || 0
+      if (priceId === 1005) {
+        totalGoldBean += price * count
+      } else {
+        totalGold += price * count
+      }
+    }
+  }
+  
+  const messages = [
+    `确定要批量出售选中的 ${selectedList.length} 种物品吗?`,
+  ]
+  if (totalGold > 0) {
+    messages.push(`金币：${totalGold}`)
+  }
+  if (totalGoldBean > 0) {
+    messages.push(`金豆豆：${totalGoldBean}`)
+  }
+  
+  confirmModal.value = {
+    show: true,
+    title: '批量出售',
+    message: messages.join('\n'),
+    type: 'danger',
+    loading: false,
+    action: 'batchSell',
+    item: null,
+    selectedItems: itemsToSell,
+  }
 }
 
 async function loadBag() {
@@ -233,7 +363,7 @@ useIntervalFn(loadBag, 60000)
     </div>
 
     <div v-else>
-      <div class="mb-4 flex flex-wrap gap-2">
+      <div class="mb-4 flex flex-wrap items-center gap-2">
         <button
           v-for="cat in CATEGORY_OPTIONS"
           :key="cat.value"
@@ -246,71 +376,120 @@ useIntervalFn(loadBag, 60000)
           {{ cat.label }}
           <span class="ml-1 text-xs opacity-70">({{ categoryCounts[cat.value] || 0 }})</span>
         </button>
+        
+        <div class="flex-1" />
+        
+        <template v-if="selectedCategory === 'fruit' || selectedCategory === 'seed' || selectedCategory === 'all'">
+          <button
+            class="rounded-lg px-3 py-1.5 text-sm font-medium transition"
+            :class="batchMode 
+              ? 'bg-orange-500 text-white dark:bg-orange-600' 
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'"
+            @click="toggleBatchMode"
+          >
+            <div v-if="batchMode" class="i-carbon-close mr-1 inline-block" />
+            {{ batchMode ? '取消批量' : '批量出售' }}
+          </button>
+          <template v-if="batchMode">
+            <button
+              class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700"
+              @click="selectAllSellable"
+            >
+              全选
+            </button>
+            <button
+              class="rounded-lg px-3 py-1.5 text-sm font-medium transition"
+              :class="selectedSellableCount > 0 
+                ? 'bg-red-500 text-white hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700' 
+                : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'"
+              :disabled="selectedSellableCount === 0"
+              @click="handleBatchSellClick"
+            >
+              出售 ({{ selectedSellableCount }})
+            </button>
+          </template>
+        </template>
       </div>
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-5 md:grid-cols-4 sm:grid-cols-3 xl:grid-cols-6">
-      <div
+        <div
           v-for="item in filteredItems"
           :key="item.id"
           class="group relative flex flex-col items-center rounded-lg border bg-white p-3 transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
-      >
-        <div class="absolute left-2 top-2 font-mono text-xs text-gray-400">
-          #{{ item.id }}
-        </div>
+          :class="{
+            'ring-2 ring-orange-500 dark:ring-orange-400': batchMode && selectedForBatch.has(Number(item.id)),
+            'opacity-50': batchMode && canBatchSell(item) && !selectedForBatch.has(Number(item.id))
+          }"
+          @click="batchMode && canBatchSell(item) && handleSellClick(item)"
+        >
+          <div class="absolute left-2 top-2 font-mono text-xs text-gray-400">
+            #{{ item.id }}
+          </div>
 
-        <div class="absolute right-1 top-1 flex gap-1">
-          <button
-            v-if="canSell(item)"
-            class="rounded bg-red-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition hover:opacity-100 dark:bg-red-600"
-            title="出售全部"
-            @click.stop="handleSellClick(item)"
-          >
-            售
-          </button>
-          <button
-            v-if="canUse(item)"
-            class="rounded bg-green-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition hover:opacity-100 dark:bg-green-600"
-            title="使用全部"
-            @click.stop="handleUseClick(item)"
-          >
-            用
-          </button>
-        </div>
+          <div class="absolute right-1 top-1 flex gap-1">
+            <template v-if="!batchMode">
+              <button
+                v-if="canSell(item)"
+                class="rounded bg-red-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition hover:opacity-100 dark:bg-red-600"
+                title="出售全部"
+                @click.stop="handleSellClick(item)"
+              >
+                售
+              </button>
+              <button
+                v-if="canUse(item)"
+                class="rounded bg-green-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition hover:opacity-100 dark:bg-green-600"
+                title="使用全部"
+                @click.stop="handleUseClick(item)"
+              >
+                用
+              </button>
+            </template>
+            <div
+              v-else-if="canBatchSell(item)"
+              class="flex h-5 w-5 items-center justify-center rounded border-2 transition"
+              :class="selectedForBatch.has(Number(item.id))
+                ? 'border-orange-500 bg-orange-500 text-white'
+                : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700'"
+            >
+              <div v-if="selectedForBatch.has(Number(item.id))" class="i-carbon-checkmark text-xs" />
+            </div>
+          </div>
 
-        <div
+          <div
             class="thumb-wrap mb-2 mt-6 flex h-16 w-16 items-center justify-center rounded-full bg-gray-50 dark:bg-gray-700/50"
             :data-fallback="(item.name || '物').slice(0, 1)"
-        >
-          <img
-              v-if="item.image && !imageErrors[item.id]"
-              :src="item.image"
-              :alt="item.name"
-              class="max-h-full max-w-full object-contain"
-              loading="lazy"
-              @error="imageErrors[item.id] = true"
           >
-          <div v-else class="text-2xl font-bold text-gray-400 uppercase">
-            {{ (item.name || '物').slice(0, 1) }}
+            <img
+                v-if="item.image && !imageErrors[item.id]"
+                :src="item.image"
+                :alt="item.name"
+                class="max-h-full max-w-full object-contain"
+                loading="lazy"
+                @error="imageErrors[item.id] = true"
+            >
+            <div v-else class="text-2xl font-bold text-gray-400 uppercase">
+              {{ (item.name || '物').slice(0, 1) }}
+            </div>
+          </div>
+
+          <div class="mb-1 w-full truncate px-2 text-center text-sm font-bold" :title="item.name">
+            {{ item.name || `物品${item.id}` }}
+          </div>
+
+          <div class="mb-2 flex flex-col items-center gap-0.5 text-xs text-gray-400">
+            <span v-if="item.uid">UID: {{ item.uid }}</span>
+            <span>
+              类型: {{ item.itemType || 0 }}
+              <span v-if="item.level > 0"> · Lv{{ item.level }}</span>
+              <span v-if="item.price > 0" :class="getPriceClass(item)"> · {{ item.price }}{{ item.priceUnit || '金' }}</span>
+            </span>
+          </div>
+
+          <div class="mt-auto font-medium" :class="item.hoursText ? 'text-blue-500' : 'text-gray-600 dark:text-gray-300'">
+            {{ item.hoursText || `x${item.count || 0}` }}
           </div>
         </div>
-
-        <div class="mb-1 w-full truncate px-2 text-center text-sm font-bold" :title="item.name">
-          {{ item.name || `物品${item.id}` }}
-        </div>
-
-        <div class="mb-2 flex flex-col items-center gap-0.5 text-xs text-gray-400">
-          <span v-if="item.uid">UID: {{ item.uid }}</span>
-          <span>
-            类型: {{ item.itemType || 0 }}
-            <span v-if="item.level > 0"> · Lv{{ item.level }}</span>
-            <span v-if="item.price > 0" :class="getPriceClass(item)"> · {{ item.price }}{{ item.priceUnit || '金' }}</span>
-          </span>
-        </div>
-
-        <div class="mt-auto font-medium" :class="item.hoursText ? 'text-blue-500' : 'text-gray-600 dark:text-gray-300'">
-          {{ item.hoursText || `x${item.count || 0}` }}
-        </div>
-      </div>
       </div>
     </div>
 
@@ -320,7 +499,7 @@ useIntervalFn(loadBag, 60000)
       :message="confirmModal.message"
       :type="confirmModal.type"
       :loading="confirmModal.loading"
-      :confirm-text="confirmModal.action === 'sell' ? '确认出售' : '确认使用'"
+      :confirm-text="confirmModal.action === 'sell' ? '确认出售' : confirmModal.action === 'batchSell' ? '确认出售' : '确认使用'"
       @confirm="handleConfirm"
       @cancel="handleCancel"
     />

@@ -279,8 +279,6 @@ const OP_META: Record<string, { label: string, icon: string, color: string }> = 
   bug: { label: '除虫', icon: 'i-carbon-warning-alt', color: 'text-red-400' },
   fertilize: { label: '施肥', icon: 'i-carbon-chemistry', color: 'text-emerald-500' },
   plant: { label: '种植', icon: 'i-carbon-tree', color: 'text-lime-500' },
-  upgrade: { label: '土地升级', icon: 'i-carbon-upgrade', color: 'text-purple-500' },
-  levelUp: { label: '账号升级', icon: 'i-carbon-user-certification', color: 'text-indigo-500' },
   steal: { label: '偷菜', icon: 'i-carbon-run', color: 'text-orange-500' },
   helpWater: { label: '帮浇水', icon: 'i-carbon-rain-drop', color: 'text-blue-300' },
   helpWeed: { label: '帮除草', icon: 'i-carbon-cut-out', color: 'text-yellow-400' },
@@ -288,6 +286,17 @@ const OP_META: Record<string, { label: string, icon: string, color: string }> = 
   taskClaim: { label: '任务', icon: 'i-carbon-task-complete', color: 'text-indigo-500' },
   sell: { label: '出售', icon: 'i-carbon-shopping-cart', color: 'text-pink-500' },
 }
+
+const filteredOperations = computed(() => {
+  const ops = status.value?.operations || {}
+  const result: Record<string, number> = {}
+  for (const key of Object.keys(ops)) {
+    if (key !== 'upgrade' && key !== 'levelUp') {
+      result[key] = ops[key]
+    }
+  }
+  return result
+})
 
 function getOpName(key: string | number) {
   return OP_META[String(key)]?.label || String(key)
@@ -716,7 +725,7 @@ useIntervalFn(updateCountdowns, 1000)
           </div>
           <div v-else class="grid grid-cols-2 gap-2 2xl:gap-3">
             <div
-              v-for="(val, key) in (status?.operations || {})"
+              v-for="(val, key) in filteredOperations"
               :key="key"
               class="flex items-center justify-between rounded bg-gray-50 px-3 py-2 dark:bg-gray-700/30"
             >
@@ -728,6 +737,19 @@ useIntervalFn(updateCountdowns, 1000)
               </div>
               <div class="text-sm font-bold 2xl:text-base">
                 {{ val }}
+              </div>
+            </div>
+            <div
+              class="col-span-2 flex items-center justify-between rounded bg-gradient-to-r from-orange-50 to-amber-50 px-3 py-2 dark:from-orange-900/20 dark:to-amber-900/20"
+            >
+              <div class="flex items-center gap-2">
+                <div class="text-base 2xl:text-lg i-carbon-run text-orange-500" />
+                <div class="text-xs text-gray-500 2xl:text-sm">
+                  累计偷菜
+                </div>
+              </div>
+              <div class="text-sm font-bold text-orange-600 2xl:text-base dark:text-orange-400">
+                {{ status?.totalSteal || 0 }}
               </div>
             </div>
           </div>

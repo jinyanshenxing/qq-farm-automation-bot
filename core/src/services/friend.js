@@ -31,6 +31,11 @@ let externalSchedulerMode = false;
 let lastResetDate = '';  // 上次重置日期 (YYYY-MM-DD)
 const friendScheduler = createScheduler('friend');
 
+// 好友列表缓存
+let friendsListCache = null;
+let friendsListCacheTime = 0;
+const FRIENDS_LIST_CACHE_TTL_MS = 60 * 1000; // 缓存 60 秒
+
 const operationLimits = new Map();
 
 const QQ_FRIEND_LIST_BATCH_SIZE = 35;
@@ -202,13 +207,13 @@ async function syncKnownFriendGidsFromRecentVisitors(force = false) {
         const current = normalizeFriendGids(getKnownFriendGids());
         const addedCount = merged.filter(gid => !current.includes(gid)).length;
         if (addedCount > 0) {
-            applyConfigSnapshot({ knownFriendGids: merged }, { persist: false });
+            applyConfigSnapshot({ knownFriendGids: merged }, { persist: false, accountId });
             const sent = postToMaster({
                 type: 'known_friend_gids_sync',
                 gids: merged,
             });
             if (!sent) {
-                applyConfigSnapshot({ knownFriendGids: merged }, { persist: true });
+                applyConfigSnapshot({ knownFriendGids: merged }, { persist: true, accountId });
             }
             log('好友', `已从最近访客自动补充 ${addedCount} 个 GID，当前已知好友 GID 共 ${merged.length} 个`, {
                 module: 'friend',
@@ -858,6 +863,17 @@ function analyzeFriendLands(lands, myGid, friendName = '', options = {}) {
  */
 async function getFriendsList(forceSync = false) {
     try {
+        // 检查缓存
+        const now = Date.now();
+        if (!forceSync && friendsListCache && (now - friendsListCacheTime) < FRIENDS_LIST_CACHE_TTL_MS) {
+            log('好友', '使用好友列表缓存', {
+                module: 'friend',
+                event: '获取好友列表',
+                result: 'cache_hit',
+            });
+            return friendsListCache;
+        }
+
         log('好友', '开始获取好友列表', {
             module: 'friend',
             event: '获取好友列表',
@@ -888,6 +904,11 @@ async function getFriendsList(forceSync = false) {
                 if (byName !== 0) return byName;
                 return Number(a.gid || 0) - Number(b.gid || 0);
             });
+        
+        // 更新缓存
+        friendsListCache = result;
+        friendsListCacheTime = now;
+        
         log('好友', `获取好友列表成功，共 ${result.length} 位好友`, {
             module: 'friend',
             event: '获取好友列表',
@@ -1952,6 +1973,11 @@ function isHelpExpLimitReached() {
     return helpAutoDisabledByLimit;
 }
 
+function clearFriendsListCache() {
+    friendsListCache = null;
+    friendsListCacheTime = 0;
+}
+
 module.exports = {
     checkFriends, startFriendCheckLoop, stopFriendCheckLoop,
     refreshFriendCheckLoop,
@@ -1963,4 +1989,5 @@ module.exports = {
     getFriendLandsDetail,
     doFriendOperation,
     doBatchFriendOp,
+    clearFriendsListCache,
 };

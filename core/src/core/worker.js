@@ -608,6 +608,10 @@ async function handleApiCall(msg) {
             case 'getFriends':
                 result = await getFriendsList(args[0] === true);
                 break;
+            case 'clearFriendsCache':
+                require('../services/friend').clearFriendsListCache();
+                result = { ok: true };
+                break;
             case 'getInteractRecords':
                 result = await getInteractRecords();
                 break;

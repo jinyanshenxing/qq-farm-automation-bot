@@ -3,11 +3,53 @@ const process = require('node:process');
  * 运行时存储 - 自动化开关、种子偏好、账号管理
  */
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { getDataFile, ensureDataDir } = require('../config/runtime-paths');
 const { readTextFile, readJsonFile, writeJsonFileAtomic } = require('../services/json-db');
 
 const STORE_FILE = getDataFile('store.json');
 const ACCOUNTS_FILE = getDataFile('accounts.json');
+const KNOWN_FRIEND_GIDS_DIR = getDataFile('known_friend_gids');
+
+function ensureKnownFriendGidsDir() {
+    if (!fs.existsSync(KNOWN_FRIEND_GIDS_DIR)) {
+        fs.mkdirSync(KNOWN_FRIEND_GIDS_DIR, { recursive: true });
+    }
+    return KNOWN_FRIEND_GIDS_DIR;
+}
+
+function getKnownFriendGidsCacheFile(accountId) {
+    const safeId = String(accountId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    return path.join(ensureKnownFriendGidsDir(), `${safeId}.json`);
+}
+
+function readKnownFriendGidsCache(accountId) {
+    try {
+        const file = getKnownFriendGidsCacheFile(accountId);
+        if (fs.existsSync(file)) {
+            const data = readJsonFile(file);
+            if (data && Array.isArray(data.gids)) {
+                return data.gids;
+            }
+        }
+    } catch (e) {
+        // 忽略读取错误
+    }
+    return null;
+}
+
+function writeKnownFriendGidsCache(accountId, gids) {
+    try {
+        const file = getKnownFriendGidsCacheFile(accountId);
+        writeJsonFileAtomic(file, {
+            gids: gids || [],
+            updatedAt: Date.now(),
+        });
+    } catch (e) {
+        // 忽略写入错误
+    }
+}
 const ALLOWED_PLANTING_STRATEGIES = ['preferred', 'level', 'max_exp', 'max_fert_exp', 'max_profit', 'max_fert_profit', 'bag_priority'];
 const ALLOWED_BAG_SEED_FALLBACK_STRATEGIES = ALLOWED_PLANTING_STRATEGIES.filter(s => s !== 'bag_priority');
 const PUSHOO_CHANNELS = new Set([
@@ -643,6 +685,10 @@ function applyConfigSnapshot(snapshot, options = {}) {
 
     if (cfg.knownFriendGids !== undefined) {
         next.knownFriendGids = normalizeKnownFriendGids(cfg.knownFriendGids, next.knownFriendGids);
+        // 同时写入缓存文件
+        if (accountId) {
+            writeKnownFriendGidsCache(accountId, next.knownFriendGids);
+        }
     }
 
     if (cfg.knownFriendGidSyncCooldownSec !== undefined) {
@@ -777,15 +823,34 @@ function getFriendQuietHours(accountId) {
 }
 
 function getKnownFriendGids(accountId) {
-    return [...(getAccountConfigSnapshot(accountId).knownFriendGids || [])];
+    const config = getAccountConfigSnapshot(accountId);
+    const configGids = config.knownFriendGids || [];
+    
+    // 如果配置中有 GID，直接返回
+    if (configGids.length > 0) {
+        return [...configGids];
+    }
+    
+    // 否则尝试从缓存文件读取
+    const cachedGids = readKnownFriendGidsCache(accountId);
+    if (cachedGids && cachedGids.length > 0) {
+        return [...cachedGids];
+    }
+    
+    return [];
 }
 
 function setKnownFriendGids(accountId, list) {
     const current = getAccountConfigSnapshot(accountId);
     const next = normalizeAccountConfig(current, accountFallbackConfig);
-    next.knownFriendGids = normalizeKnownFriendGids(list, next.knownFriendGids);
+    const normalizedGids = normalizeKnownFriendGids(list, next.knownFriendGids);
+    next.knownFriendGids = normalizedGids;
     setAccountConfigSnapshot(accountId, next);
-    return [...next.knownFriendGids];
+    
+    // 同时写入缓存文件
+    writeKnownFriendGidsCache(accountId, normalizedGids);
+    
+    return [...normalizedGids];
 }
 
 function getKnownFriendGidSyncCooldownSec(accountId) {

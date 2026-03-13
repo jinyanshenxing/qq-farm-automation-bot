@@ -59,6 +59,8 @@ const operations = {
     levelUp: 0,
 };
 
+let totalSteal = 0;
+
 const lastState = {
     gold: -1,
     exp: -1,
@@ -85,6 +87,9 @@ let saveTimer = null;
 function recordOperation(type, count = 1) {
     if (operations[type] !== undefined) {
         operations[type] += count;
+        if (type === 'steal') {
+            totalSteal += count;
+        }
         scheduleSave();
     }
 }
@@ -105,6 +110,7 @@ function doSave() {
         date: todayKey,
         operations: { ...operations },
         initialState: { ...initialState },
+        totalSteal,
         savedAt: Date.now(),
     };
     savePersistedStats(currentAccountId, data);
@@ -141,6 +147,12 @@ function initStatsWithPersistence(accountId, gold, exp, coupon = 0) {
         if (saved) {
             console.warn(`[统计] 日期已变更，重置统计 (${saved.date} -> ${todayKey})`);
         }
+    }
+
+    if (saved && typeof saved.totalSteal === 'number') {
+        totalSteal = saved.totalSteal;
+    } else {
+        totalSteal = 0;
     }
 
     initStats(gold, exp, coupon);
@@ -234,6 +246,7 @@ function getStats(statusData, userState, connected, limits) {
         },
         uptime: process.uptime(),
         operations: operationsSnapshot,
+        totalSteal,
         sessionExpGained: session.expGained,
         sessionGoldGained: session.goldGained,
         sessionCouponGained: session.couponGained,

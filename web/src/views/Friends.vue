@@ -8,6 +8,7 @@ import { useAccountStore } from '@/stores/account'
 import { useFriendStore } from '@/stores/friend'
 import { useStatusStore } from '@/stores/status'
 import { useToastStore } from '@/stores/toast'
+import api from '@/api'
 
 const accountStore = useAccountStore()
 const friendStore = useFriendStore()
@@ -133,17 +134,45 @@ async function onConfirm() {
 }
 
 const expandedFriends = ref<Set<string>>(new Set())
+const currentPage = ref(1)
+const pageSize = 25
+
+const sortedFriends = computed(() => {
+  return [...friends.value].sort((a: any, b: any) => {
+    const levelA = Number(a?.level || 0)
+    const levelB = Number(b?.level || 0)
+    return levelB - levelA
+  })
+})
+
 const filteredFriends = computed(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
+  const list = sortedFriends.value
   if (!keyword)
-    return friends.value
+    return list
 
-  return friends.value.filter((friend: any) => {
+  return list.filter((friend: any) => {
     const name = String(friend?.name || '').toLowerCase()
     const gid = String(friend?.gid || '')
     const uin = String(friend?.uin || '')
     return name.includes(keyword) || gid.includes(keyword) || uin.includes(keyword)
   })
+})
+
+const totalPages = computed(() => Math.ceil(filteredFriends.value.length / pageSize) || 1)
+
+const paginatedFriends = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  const end = start + pageSize
+  return filteredFriends.value.slice(start, end)
+})
+
+function goToPage(page: number) {
+  currentPage.value = Math.max(1, Math.min(page, totalPages.value))
+}
+
+watch(searchKeyword, () => {
+  currentPage.value = 1
 })
 
 const filteredInteractRecords = computed(() => {
@@ -201,6 +230,18 @@ watch(currentAccountId, () => {
   expandedFriends.value.clear()
   loadData()
 })
+
+async function handleRefreshFriends() {
+  if (!currentAccountId.value) return
+  try {
+    await api.post('/api/friends/clear-cache', {}, {
+      headers: { 'x-account-id': currentAccountId.value },
+    })
+  } catch {
+    // ignore
+  }
+  await friendStore.fetchFriends(currentAccountId.value, true)
+}
 
 function toggleFriend(friendId: string) {
   if (expandedFriends.value.has(friendId)) {
@@ -671,7 +712,7 @@ async function handleBatchAddKnownFriendGids() {
         </div>
 
         <template v-else>
-          <div class="flex flex-wrap gap-2 rounded-lg bg-white p-3 shadow dark:bg-gray-800">
+          <div class="flex flex-wrap items-center gap-2 rounded-lg bg-white p-3 shadow dark:bg-gray-800">
             <span class="flex items-center text-sm text-gray-500 dark:text-gray-400">批量操作：</span>
             <button
               class="rounded bg-green-100 px-3 py-1.5 text-sm text-green-700 transition dark:bg-green-900/30 hover:bg-green-200 dark:text-green-400 disabled:opacity-50 dark:hover:bg-green-900/50"
@@ -697,10 +738,19 @@ async function handleBatchAddKnownFriendGids() {
               <div v-if="batchLoading" class="i-svg-spinners-90-ring-with-bg mr-1 inline-block align-text-bottom" />
               一键捣乱
             </button>
+            <div class="flex-1" />
+            <button
+              class="rounded bg-gray-100 px-3 py-1.5 text-sm text-gray-600 transition dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
+              :disabled="loading"
+              @click="handleRefreshFriends"
+            >
+              <div v-if="loading" class="i-svg-spinners-90-ring-with-bg mr-1 inline-block align-text-bottom" />
+              刷新列表
+            </button>
           </div>
 
           <div
-            v-for="friend in filteredFriends"
+            v-for="friend in paginatedFriends"
             :key="friend.gid"
             class="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800"
           >
@@ -811,6 +861,59 @@ async function handleBatchAddKnownFriendGids() {
                 />
               </div>
             </div>
+          </div>
+
+          <!-- 分页控件 -->
+          <div v-if="filteredFriends.length > pageSize" class="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <button
+              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              :disabled="currentPage === 1"
+              @click="goToPage(1)"
+            >
+              首页
+            </button>
+            <button
+              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              :disabled="currentPage === 1"
+              @click="goToPage(currentPage - 1)"
+            >
+              上一页
+            </button>
+            <div class="flex items-center gap-1">
+              <template v-for="p in totalPages" :key="p">
+                <button
+                  v-if="p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1)"
+                  class="h-8 w-8 rounded text-sm transition"
+                  :class="p === currentPage
+                    ? 'bg-blue-500 text-white'
+                    : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'"
+                  @click="goToPage(p)"
+                >
+                  {{ p }}
+                </button>
+                <span
+                  v-else-if="p === currentPage - 2 || p === currentPage + 2"
+                  class="px-1 text-gray-400"
+                >...</span>
+              </template>
+            </div>
+            <button
+              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              :disabled="currentPage === totalPages"
+              @click="goToPage(currentPage + 1)"
+            >
+              下一页
+            </button>
+            <button
+              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              :disabled="currentPage === totalPages"
+              @click="goToPage(totalPages)"
+            >
+              末页
+            </button>
+            <span class="text-sm text-gray-500 dark:text-gray-400">
+              共 {{ filteredFriends.length }} 位好友
+            </span>
           </div>
         </template>
       </div>

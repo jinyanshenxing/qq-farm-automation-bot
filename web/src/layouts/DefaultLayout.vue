@@ -137,11 +137,6 @@ function closeWarningModal() {
       </Transition>
     </Teleport>
 
-    <!-- 全局水印 -->
-    <div class="watermark-container">
-      <div class="watermark" />
-    </div>
-
     <!-- Mobile Sidebar Overlay -->
     <div
       v-if="sidebarOpen"
@@ -288,29 +283,6 @@ function closeWarningModal() {
   50% {
     filter: drop-shadow(0 0 20px rgba(239, 68, 68, 0.5));
   }
-}
-
-/* 水印样式 */
-.watermark-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
-  overflow: hidden;
-}
-
-.watermark {
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='200'%3E%3Ctext x='50%25' y='50%25' font-size='16' font-family='Arial, sans-serif' fill='rgba(128, 128, 128, 0.15)' text-anchor='middle' dominant-baseline='middle' transform='rotate(-25, 150, 100)'%3E开源项目 禁止贩卖%3C/text%3E%3C/svg%3E");
-  background-repeat: repeat;
-  transform: rotate(0deg);
 }
 
 /* Slide Fade Transition */
