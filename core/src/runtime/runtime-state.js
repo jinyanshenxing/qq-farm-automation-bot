@@ -45,6 +45,8 @@ function createRuntimeState(options) {
             plantBlacklist: store.getPlantBlacklist(accountId),
             knownFriendGids: store.getKnownFriendGids(accountId),
             knownFriendGidSyncCooldownSec: store.getKnownFriendGidSyncCooldownSec(accountId),
+            bagSeedPriority: store.getBagSeedPriority(accountId),
+            bagSeedFallbackStrategy: store.getBagSeedFallbackStrategy(accountId),
             __revision: configRevision,
         };
     }

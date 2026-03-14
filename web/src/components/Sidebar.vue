@@ -237,6 +237,7 @@ const renewChecking = ref(false)
 
 // 公告相关
 const showAnnouncementModal = ref(false)
+const showAnnouncementViewModal = ref(false)
 const announcementContent = ref('')
 const announcementShowOnce = ref(true)
 const announcementSaving = ref(false)
@@ -371,9 +372,23 @@ async function fetchAnnouncement() {
     const res = await api.get('/api/announcement')
     if (res.data?.ok && res.data?.data) {
       currentAnnouncement.value = res.data.data
+      if (res.data.data.shouldShow && res.data.data.content) {
+        showAnnouncementViewModal.value = true
+      }
     }
-  } catch (e) {
+  }
+  catch (e) {
     console.error('获取公告失败', e)
+  }
+}
+
+async function markAnnouncementRead() {
+  try {
+    await api.post('/api/announcement/read')
+    showAnnouncementViewModal.value = false
+  }
+  catch (e) {
+    console.error('标记公告已读失败', e)
   }
 }
 
@@ -652,49 +667,6 @@ async function copyToken() {
       </router-link>
     </nav>
 
-    <!-- Theme Settings -->
-    <div class="border-t border-gray-200/50 px-3 py-2 dark:border-gray-700/50">
-      <button
-        class="w-full flex items-center justify-between rounded-lg px-3 py-2 transition-colors hover:bg-gray-100/50 dark:hover:bg-gray-700/50"
-        @click="showThemeDropdown = !showThemeDropdown"
-      >
-        <div class="flex items-center gap-2">
-          <div class="i-carbon-color-palette text-sm" :style="{ color: 'var(--theme-primary)' }" />
-          <span class="text-xs text-gray-500 font-medium dark:text-gray-400">主题设置</span>
-        </div>
-        <div
-          class="i-carbon-chevron-down text-gray-400 transition-transform duration-200"
-          :class="{ 'rotate-180': showThemeDropdown }"
-        />
-      </button>
-      <div
-        v-show="showThemeDropdown"
-        class="grid grid-cols-4 gap-1.5 px-1 pt-2 transition-all"
-      >
-        <button
-          v-for="(t, theme) in appStore.themes"
-          :key="theme"
-          class="group relative flex flex-col items-center justify-center gap-1 rounded-lg p-2 transition-all hover:scale-105"
-          :class="{
-            'ring-2 ring-offset-1': appStore.currentTheme === theme,
-          }"
-          :style="{
-            'background': t.gradient,
-            '--tw-ring-color': t.primary,
-            '--tw-ring-offset-color': 'var(--theme-bg)',
-          }"
-          :title="t.name"
-          @click="appStore.applyTheme(theme as any)"
-        >
-          <div :class="t.icon" class="text-base text-white" />
-          <span class="text-[10px] text-white font-medium leading-tight">{{ t.name }}</span>
-          <div
-            v-if="appStore.currentTheme === theme"
-            class="i-carbon-checkmark absolute right-0.5 top-0.5 text-[10px] text-white"
-          />
-        </button>
-      </div>
-    </div>
 
     <!-- Token Display (All Users) -->
     <div v-if="userStore.token" class="border-t border-gray-200/50 px-3 py-2 dark:border-gray-700/50">
@@ -741,7 +713,7 @@ async function copyToken() {
     </div>
 
     <!-- Footer Status -->
-    <div class="mt-auto border-t border-gray-200/50 bg-gray-100/30 p-4 dark:border-gray-700/50 dark:bg-gray-800/30">
+    <div class="relative mt-auto border-t border-gray-200/50 bg-gray-100/30 p-4 dark:border-gray-700/50 dark:bg-gray-800/30">
       <div class="mb-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
         <div class="flex items-center gap-1.5">
           <div
@@ -755,6 +727,14 @@ async function copyToken() {
       <div class="mt-1 flex flex-col gap-0.5 text-xs text-gray-400 font-mono">
         <div class="flex items-center justify-between">
           <span>{{ formattedTime }}</span>
+          <!-- 主题调色盘按钮 -->
+          <button
+            class="flex items-center gap-1 rounded px-2 py-1 text-gray-400 transition-colors hover:bg-gray-200/50 hover:text-gray-600 dark:hover:bg-gray-700/50 dark:hover:text-gray-300"
+            title="主题设置"
+            @click="showThemeDropdown = !showThemeDropdown"
+          >
+            <div class="i-carbon-color-palette text-sm" :style="{ color: 'var(--theme-primary)' }" />
+          </button>
         </div>
         <div class="flex items-center justify-between opacity-50">
           <div class="flex items-center gap-2">
@@ -771,6 +751,37 @@ async function copyToken() {
           </div>
           <span v-if="serverVersion">Core v{{ serverVersion }}</span>
         </div>
+      </div>
+      
+      <!-- 主题选择弹出面板 -->
+      <div
+        v-show="showThemeDropdown"
+        class="absolute bottom-full left-0 right-0 z-50 mb-14 grid grid-cols-4 gap-1.5 rounded-lg bg-white p-2 shadow-lg dark:bg-gray-800"
+      >
+        <button
+          v-for="(t, theme) in appStore.themes"
+          :key="theme"
+          class="group relative flex flex-col items-center justify-center gap-1 rounded-lg p-2 transition-all hover:scale-105"
+          :class="{
+            'ring-2 ring-offset-1': appStore.currentTheme === theme,
+          }"
+          :style="{
+            'background': t.gradient,
+            '--tw-ring-color': t.primary,
+            '--tw-ring-offset-color': 'var(--theme-bg)',
+          }"
+          :title="t.name"
+          @click="appStore.applyTheme(theme as any); showThemeDropdown = false"
+        >
+          <div :class="t.icon" class="text-base text-white" />
+          <span class="text-[10px] text-white font-medium leading-tight">{{ t.name }}</span>
+          <div
+            v-if="appStore.currentTheme === theme"
+            class="absolute right-1 top-1 h-3 w-3 flex items-center justify-center rounded-full bg-white shadow"
+          >
+            <div class="i-carbon-checkmark text-xs" :style="{ color: t.primary }" />
+          </div>
+        </button>
       </div>
     </div>
   </aside>
@@ -988,6 +999,34 @@ async function copyToken() {
     </div>
   </div>
 
+  <!-- 普通用户查看公告弹窗 -->
+  <div
+    v-if="showAnnouncementViewModal && currentAnnouncement?.content"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+  >
+    <div class="w-[500px] rounded-xl bg-white p-5 shadow-2xl dark:bg-gray-800">
+      <div class="mb-4 flex items-center gap-2">
+        <div class="i-carbon-notification text-xl" :style="{ color: 'var(--theme-primary)' }" />
+        <h3 class="text-lg text-gray-900 font-bold dark:text-gray-100">
+          系统公告
+        </h3>
+      </div>
+
+      <div class="mb-4 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-gray-700/50 dark:text-gray-300">
+        {{ currentAnnouncement.content }}
+      </div>
+
+      <div class="flex justify-end">
+        <button
+          class="rounded-lg px-4 py-1.5 text-sm text-white font-medium shadow transition hover:opacity-90"
+          :style="{ backgroundColor: 'var(--theme-primary)' }"
+          @click="markAnnouncementRead"
+        >
+          我知道了
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>

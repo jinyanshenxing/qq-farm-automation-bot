@@ -462,6 +462,23 @@ watchEffect(async () => {
   // 背包种子优先策略使用第二优先策略预览
   if (strategy === 'bag_priority') {
     strategy = localSettings.value.bagSeedFallbackStrategy || 'level'
+    // 如果第二优先策略是 preferred，显示优先种子预览
+    if (strategy === 'preferred') {
+      const preferredId = localSettings.value.preferredSeedId
+      if (preferredId > 0 && seeds.value) {
+        const seed = seeds.value.find(s => s.seedId === preferredId)
+        if (seed) {
+          strategyPreviewLabel.value = `${seed.requiredLevel}级 ${seed.name}`
+        }
+        else {
+          strategyPreviewLabel.value = '未选择优先种子'
+        }
+      }
+      else {
+        strategyPreviewLabel.value = '未选择优先种子'
+      }
+      return
+    }
   }
   if (!seeds.value || seeds.value.length === 0) {
     strategyPreviewLabel.value = null
@@ -674,6 +691,12 @@ async function handleTestOffline() {
             />
             <BaseSelect
               v-if="localSettings.plantingStrategy === 'preferred'"
+              v-model="localSettings.preferredSeedId"
+              label="优先种植种子"
+              :options="preferredSeedOptions"
+            />
+            <BaseSelect
+              v-else-if="localSettings.plantingStrategy === 'bag_priority' && localSettings.bagSeedFallbackStrategy === 'preferred'"
               v-model="localSettings.preferredSeedId"
               label="优先种植种子"
               :options="preferredSeedOptions"
