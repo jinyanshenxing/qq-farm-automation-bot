@@ -173,10 +173,8 @@ function getEffectiveKnownQqFriendGids() {
     const accountId = process.env.FARM_ACCOUNT_ID || '';
 
     const invalidGidSet = getInvalidKnownFriendGidSet();
-    return normalizeFriendGids([
-        ...currentKnownGids,
-        ...getFriendBlacklist(accountId),
-    ]).filter(gid => !invalidGidSet.has(gid));
+    const blacklistSet = new Set(getFriendBlacklist(accountId));
+    return normalizeFriendGids(currentKnownGids).filter(gid => !invalidGidSet.has(gid) && !blacklistSet.has(gid));
 }
 
 async function syncKnownFriendGidsFromRecentVisitors(force = false) {

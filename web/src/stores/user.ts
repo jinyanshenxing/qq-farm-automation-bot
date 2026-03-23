@@ -17,6 +17,22 @@ export interface User {
   card: UserCard | null
   accountLimit: number
   avatar?: string
+  mustChangePassword?: boolean
+}
+
+export interface LoginResult {
+  ok: boolean
+  error?: string
+  errorType?: 'rate_limit' | 'locked' | 'invalid_credentials'
+  remainingMs?: number
+  data?: {
+    token: string
+    role: string
+    card: UserCard | null
+    accountLimit: number
+    user: { username: string }
+    mustChangePassword?: boolean
+  }
 }
 
 export interface Card {
@@ -59,22 +75,36 @@ export const useUserStore = defineStore('user', () => {
     return date.toLocaleString('zh-CN')
   })
 
-  async function login(username: string, password: string) {
-    const res = await api.post('/api/login', { username, password })
-    if (res.data.ok) {
-      token.value = res.data.data.token
-      userInfo.value = {
-        username: res.data.data.user.username,
-        role: res.data.data.role,
-        card: res.data.data.card,
-        accountLimit: res.data.data.accountLimit ?? 2,
+  async function login(username: string, password: string): Promise<LoginResult> {
+    try {
+      const res = await api.post('/api/login', { username, password })
+      if (res.data.ok) {
+        token.value = res.data.data.token
+        userInfo.value = {
+          username: res.data.data.user.username,
+          role: res.data.data.role,
+          card: res.data.data.card,
+          accountLimit: res.data.data.accountLimit ?? 2,
+          mustChangePassword: res.data.data.mustChangePassword,
+        }
+        const { useWxLoginStore } = await import('./wx-login')
+        const wxLoginStore = useWxLoginStore()
+        await wxLoginStore.loadConfigFromServer()
       }
-      // 登录成功后加载微信配置
-      const { useWxLoginStore } = await import('./wx-login')
-      const wxLoginStore = useWxLoginStore()
-      await wxLoginStore.loadConfigFromServer()
+      return res.data
     }
-    return res.data
+    catch (error: any) {
+      const data = error.response?.data
+      if (data) {
+        return {
+          ok: false,
+          error: data.error,
+          errorType: data.errorType,
+          remainingMs: data.remainingMs,
+        }
+      }
+      return { ok: false, error: error.message || '网络错误' }
+    }
   }
 
   async function register(username: string, password: string, cardCode: string) {
@@ -128,8 +158,13 @@ export const useUserStore = defineStore('user', () => {
     return res.data
   }
 
-  async function getAllUsersWithPassword() {
-    const res = await api.get('/api/admin/users-with-password')
+  async function getLoginLogs(limit = 100, offset = 0) {
+    const res = await api.get('/api/admin/login-logs', { params: { limit, offset } })
+    return res.data
+  }
+
+  async function clearLoginLogs() {
+    const res = await api.delete('/api/admin/login-logs')
     return res.data
   }
 
@@ -191,7 +226,8 @@ export const useUserStore = defineStore('user', () => {
     renew,
     changePassword,
     getAllUsers,
-    getAllUsersWithPassword,
+    getLoginLogs,
+    clearLoginLogs,
     updateUser,
     deleteUser,
     renewUser,

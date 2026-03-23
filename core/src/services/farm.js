@@ -5,7 +5,7 @@
 const protobuf = require('protobufjs');
 const { CONFIG, PlantPhase, PHASE_NAMES } = require('../config/config');
 const { getPlantNameBySeedId, getPlantName, getPlantExp, formatGrowTime, getPlantGrowTime, getAllSeeds, getPlantById, getPlantBySeedId, getSeedImageBySeedId } = require('../config/gameConfig');
-const { isAutomationOn, getPreferredSeed, getAutomation, getPlantingStrategy, getBagSeedPriority, getBagSeedFallbackStrategy } = require('../models/store');
+const { isAutomationOn, getPreferredSeed, getAutomation, getPlantingStrategy, getBagSeedPriority, getBagSeedFallbackStrategy, getFastHarvestConfig } = require('../models/store');
 const { sendMsgAsync, getUserState, networkEvents, getWsErrorState } = require('../utils/network');
 const { types } = require('../utils/proto');
 const { toLong, toNum, getServerTimeSec, toTimeSec, log, logWarn, sleep } = require('../utils/utils');
@@ -20,6 +20,11 @@ let isFirstFarmCheck = true;
 let farmLoopRunning = false;
 let externalSchedulerMode = false;
 const farmScheduler = createScheduler('farm');
+
+// ============ 秒收取状态 ============
+const fastHarvestTasks = new Map();
+const FAST_HARVEST_WINDOW_SEC = 300;
+let fastHarvestTaskIdCounter = 0;
 
 // ============ 农场 API ============
 
@@ -246,6 +251,28 @@ function getDisplayLandContext(land, landsMap) {
 
 function isOccupiedSlaveLand(land, landsMap) {
     return !!getDisplayLandContext(land, landsMap).occupiedByMaster;
+}
+
+function buildSlaveToMasterMap(lands) {
+    const map = new Map();
+    for (const land of (Array.isArray(lands) ? lands : [])) {
+        const slaveIds = getSlaveLandIds(land);
+        const masterId = toNum(land && land.id);
+        if (slaveIds.length > 0 && masterId > 0) {
+            for (const slaveId of slaveIds) {
+                if (slaveId > 0 && slaveId !== masterId) {
+                    map.set(slaveId, masterId);
+                }
+            }
+        }
+    }
+    return map;
+}
+
+function isOccupiedSlaveLandWithMap(land, landsMap, slaveToMasterMap) {
+    const landId = toNum(land && land.id);
+    if (!landId) return false;
+    return slaveToMasterMap.has(landId);
 }
 
 function summarizeLandDetails(lands) {
@@ -998,7 +1025,7 @@ async function getLandsDetail() {
 }
 
 async function autoPlantEmptyLands(deadLandIds, emptyLandIds) {
-    let landsToPlant = [...emptyLandIds];
+    const landsToPlant = [...emptyLandIds];
     const state = getUserState();
 
     // 1. 铲除枯死/收获残留植物（一键操作）
@@ -1416,6 +1443,15 @@ async function runFarmOperation(opType) {
     }
 
     const lands = landsReply.lands;
+
+    if (opType === 'all') {
+        try {
+            await syncFastHarvestTasks(lands);
+        } catch (e) {
+            logWarn('秒收取', `同步任务失败: ${e.message}`);
+        }
+    }
+
     const status = analyzeLands(lands);
 
     // 摘要
@@ -1488,6 +1524,8 @@ async function runFarmOperation(opType) {
         let allDeadLands = [...new Set(status.dead)];
 
         if (opType === 'all' && harvestedLandIds.length > 0) {
+            // 收获后延迟 1 秒再铲除枯地
+            await sleep(1000);
             //const postHarvest = await resolveRemovableHarvestedLands(harvestedLandIds, harvestReply);
             postHarvest = await resolveRemovableHarvestedLands(harvestedLandIds, harvestReply);
             allDeadLands = [...new Set([...allDeadLands, ...postHarvest.removable])];
@@ -1645,6 +1683,197 @@ function refreshFarmCheckLoop(delayMs = 200) {
     scheduleNextFarmCheck(delayMs);
 }
 
+function getFastHarvestTaskId() {
+    fastHarvestTaskIdCounter += 1;
+    return `fast_harvest_${fastHarvestTaskIdCounter}`;
+}
+
+async function executeFastHarvest(landId, matureTimeSec) {
+    const state = getUserState();
+    if (!state.gid) return;
+
+    const config = getFastHarvestConfig(state.accountId);
+    if (!config.enabled) return;
+
+    const nowSec = getServerTimeSec();
+    const waitTimeMs = (matureTimeSec - nowSec) * 1000 - config.advanceMs;
+
+    if (waitTimeMs <= 0) {
+        try {
+            await harvest([landId]);
+            log('秒收取', `土地#${landId} 已立即收获`, {
+                module: 'farm',
+                event: '秒收取',
+                result: 'ok',
+                landId,
+                mode: 'immediate',
+            });
+            recordOperation('harvest', 1);
+        } catch (e) {
+            logWarn('秒收取', `土地#${landId} 立即收获失败: ${e.message}`);
+        }
+        return;
+    }
+
+    const taskId = getFastHarvestTaskId();
+    const waitSec = Math.max(0, waitTimeMs / 1000);
+    const strategyInfo = config.fertilizerStrategy === 'smart' 
+        ? ` (快成熟模式, 提前${config.fertilizerSmartSeconds}秒)` 
+ : '';
+    log('秒收取', `土地#${landId} 将在 ${waitSec.toFixed(1)} 秒后执行秒收 (提前 ${config.advanceMs}ms)${strategyInfo}`, {
+        module: 'farm',
+        event: '秒收取调度',
+        landId,
+        waitSec,
+        advanceMs: config.advanceMs,
+        fertilizerStrategy: config.fertilizerStrategy,
+        fertilizerSmartSeconds: config.fertilizerSmartSeconds,
+    });
+
+    farmScheduler.setTimeoutTask(taskId, waitTimeMs, async () => {
+        try {
+            const landsReply = await getAllLands();
+            const landsMap = buildLandMap(landsReply.lands);
+            const land = landsMap.get(landId);
+
+            if (!land || !land.plant) {
+                log('秒收取', `土地#${landId} 已为空，跳过`, { module: 'farm', event: '秒收取跳过', landId });
+                return;
+            }
+
+            const currentPhase = getCurrentPhase(land.plant.phases);
+            if (!currentPhase || currentPhase.phase !== PlantPhase.MATURE) {
+                log('秒收取', `土地#${landId} 未成熟，跳过`, { module: 'farm', event: '秒收取跳过', landId });
+                return;
+            }
+
+            await harvest([landId]);
+            const strategyInfo = config.fertilizerStrategy === 'smart' 
+                ? ` (快成熟模式)` 
+                : '';
+            log('秒收取', `土地#${landId} 秒收成功${strategyInfo}`, {
+                module: 'farm',
+                event: '秒收取',
+                result: 'ok',
+                landId,
+                mode: 'scheduled',
+                fertilizerStrategy: config.fertilizerStrategy,
+            });
+            recordOperation('harvest', 1);
+        } catch (e) {
+            logWarn('秒收取', `土地#${landId} 秒收失败: ${e.message}`);
+        }
+    });
+
+    fastHarvestTasks.set(landId, {
+        taskId,
+        matureTime: matureTimeSec,
+        timeoutId: null,
+    });
+}
+
+async function syncFastHarvestTasks(lands) {
+    const state = getUserState();
+    if (!state.gid) return;
+
+    const config = getFastHarvestConfig(state.accountId);
+    if (!config.enabled) {
+        if (fastHarvestTasks.size > 0) {
+            for (const [, taskInfo] of fastHarvestTasks) {
+                farmScheduler.clear(taskInfo.taskId);
+            }
+            fastHarvestTasks.clear();
+        }
+        return;
+    }
+
+    const nowSec = getServerTimeSec();
+    const landsMap = buildLandMap(lands);
+
+    for (const [landId, taskInfo] of fastHarvestTasks) {
+        const land = landsMap.get(landId);
+        if (!land || !land.plant) {
+            farmScheduler.clear(taskInfo.taskId);
+            fastHarvestTasks.delete(landId);
+            continue;
+        }
+
+        const currentPhase = getCurrentPhase(land.plant.phases);
+        if (!currentPhase || currentPhase.phase === PlantPhase.MATURE || currentPhase.phase === PlantPhase.DEAD) {
+            farmScheduler.clear(taskInfo.taskId);
+            fastHarvestTasks.delete(landId);
+        }
+    }
+
+    const slaveToMasterMap = buildSlaveToMasterMap(lands);
+
+    for (const land of lands) {
+        const landId = toNum(land.id);
+        if (!landId || !land.unlocked) continue;
+
+        if (isOccupiedSlaveLandWithMap(land, landsMap, slaveToMasterMap)) continue;
+
+        const plant = land.plant;
+        if (!plant || !plant.phases || plant.phases.length === 0) continue;
+
+        const currentPhase = getCurrentPhase(plant.phases);
+        if (!currentPhase) continue;
+        if (currentPhase.phase === PlantPhase.DEAD) continue;
+        if (currentPhase.phase === PlantPhase.MATURE) continue;
+
+        const maturePhase = plant.phases.find(p => toNum(p.phase) === PlantPhase.MATURE);
+        if (!maturePhase) continue;
+
+        const matureBeginTime = toTimeSec(maturePhase.begin_time);
+        if (matureBeginTime <= 0) continue;
+
+        let effectiveMatureTime = matureBeginTime;
+        const advanceSec = (config.advanceMs || 0) / 1000;
+
+        if (config.fertilizerStrategy === 'smart') {
+            effectiveMatureTime = matureBeginTime - config.fertilizerSmartSeconds;
+        }
+
+        const timeToMature = effectiveMatureTime - nowSec;
+
+        const effectiveWindow = Math.max(FAST_HARVEST_WINDOW_SEC, advanceSec + 60);
+
+        if (timeToMature <= effectiveWindow && timeToMature > 0) {
+            if (fastHarvestTasks.has(landId)) {
+                const existingTask = fastHarvestTasks.get(landId);
+                if (Math.abs(existingTask.matureTime - effectiveMatureTime) > 5) {
+                    farmScheduler.clear(existingTask.taskId);
+                    fastHarvestTasks.delete(landId);
+                    await executeFastHarvest(landId, effectiveMatureTime);
+                }
+            } else {
+                await executeFastHarvest(landId, effectiveMatureTime);
+            }
+        }
+    }
+}
+
+function getActiveFastHarvestTasks() {
+    const tasks = [];
+    const nowSec = getServerTimeSec();
+    for (const [landId, taskInfo] of fastHarvestTasks) {
+        tasks.push({
+            landId,
+            matureTime: taskInfo.matureTime,
+            waitSeconds: Math.max(0, taskInfo.matureTime - nowSec),
+        });
+    }
+    return tasks.sort((a, b) => a.matureTime - b.matureTime);
+}
+
+function clearAllFastHarvestTasks() {
+    for (const [, taskInfo] of fastHarvestTasks) {
+        farmScheduler.clear(taskInfo.taskId);
+    }
+    fastHarvestTasks.clear();
+    log('秒收取', '已清除所有秒收任务', { module: 'farm', event: '秒收取清除' });
+}
+
 module.exports = {
     checkFarm, startFarmCheckLoop, stopFarmCheckLoop,
     refreshFarmCheckLoop,
@@ -1653,9 +1882,13 @@ module.exports = {
     getAllLands,
     getLandsDetail,
     getAvailableSeeds,
-    runFarmOperation, // 导出新函数
+    runFarmOperation,
     runFertilizerByConfig,
     buildLandMap,
+    buildSlaveToMasterMap,
     getDisplayLandContext,
     isOccupiedSlaveLand,
+    syncFastHarvestTasks,
+    getActiveFastHarvestTasks,
+    clearAllFastHarvestTasks,
 };

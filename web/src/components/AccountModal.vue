@@ -16,8 +16,8 @@ const emit = defineEmits(['close', 'saved'])
 
 const wxLoginStore = useWxLoginStore()
 
-// 标签页：wx-微信扫码, wx-config-微信配置, manual-手动填码
-const activeTab = ref<'wx' | 'wx-config' | 'manual'>('manual')
+// 标签页：wx-微信扫码, manual-手动填码
+const activeTab = ref<'wx' | 'manual'>('manual')
 const loading = ref(false)
 const errorMessage = ref('')
 
@@ -43,14 +43,23 @@ const { pause: stopWxCheck, resume: startWxCheck } = useIntervalFn(async () => {
     const codeResult = await wxLoginStore.getFarmCode()
     if (codeResult.success && codeResult.code) {
       const name = wxAccountName.value.trim() || result.nickname || `微信账号${Date.now()}`
-      await addAccount({
-        id: props.editData?.id,
-        name: props.editData ? (props.editData.name || name) : name,
-        code: codeResult.code,
-        platform: 'wx',
-        loginType: 'wx_qr',
-        wxid: result.wxid,
-      })
+      // 检查是否启用自动添加账号
+      if (wxLoginStore.config.autoAddAccount) {
+        await addAccount({
+          id: props.editData?.id,
+          name: props.editData ? (props.editData.name || name) : name,
+          code: codeResult.code,
+          platform: 'wx',
+          loginType: 'wx_qr',
+          wxid: result.wxid,
+        })
+      }
+      else {
+        // 不自动添加，只显示 code 让用户手动复制
+        form.code = codeResult.code
+        form.platform = 'wx'
+        activeTab.value = 'manual'
+      }
     }
   }
 }, 2000, { immediate: false })
@@ -64,17 +73,6 @@ async function loadWxQRCode() {
   if (success) {
     startWxCheck()
   }
-}
-
-// 保存微信配置
-function saveWxConfig() {
-  wxLoginStore.updateConfig({
-    apiBase: wxLoginStore.config.apiBase,
-    apiKey: wxLoginStore.config.apiKey,
-    proxyApiUrl: wxLoginStore.config.proxyApiUrl,
-  })
-  activeTab.value = 'wx'
-  loadWxQRCode()
 }
 
 // 添加账号
@@ -226,6 +224,7 @@ watch(activeTab, (tab) => {
             手动填码
           </button>
           <button
+            v-if="wxLoginStore.config.enabled"
             class="flex-1 py-2 text-center text-sm font-medium transition-colors"
             :class="activeTab === 'wx' ? 'border-b-2' : 'opacity-60'"
             :style="{
@@ -235,17 +234,6 @@ watch(activeTab, (tab) => {
             @click="activeTab = 'wx'"
           >
             微信扫码
-          </button>
-          <button
-            class="flex-1 py-2 text-center text-sm font-medium transition-colors"
-            :class="activeTab === 'wx-config' ? 'border-b-2' : 'opacity-60'"
-            :style="{
-              color: activeTab === 'wx-config' ? 'var(--theme-primary)' : 'var(--theme-text)',
-              borderColor: 'var(--theme-primary)',
-            }"
-            @click="activeTab = 'wx-config'"
-          >
-            微信配置
           </button>
         </div>
 
@@ -289,44 +277,6 @@ watch(activeTab, (tab) => {
 
           <div class="text-center text-xs opacity-60" :style="{ color: 'var(--theme-text)' }">
             使用微信扫描二维码登录，登录成功后将自动添加账号
-          </div>
-        </div>
-
-        <!-- 微信配置 Tab -->
-        <div v-if="activeTab === 'wx-config'" class="space-y-4">
-          <BaseInput
-            v-model="wxLoginStore.config.apiBase"
-            label="后端API地址"
-            placeholder="http://127.0.0.1:8059/api"
-          />
-          <p class="text-xs opacity-60" :style="{ color: 'var(--theme-text)' }">
-            当前项目后端地址，默认：http://127.0.0.1:8059/api
-          </p>
-
-          <BaseInput
-            v-model="wxLoginStore.config.apiKey"
-            label="API Key（可选）"
-            placeholder="留空使用本地API，填写则使用代理模式"
-          />
-
-          <BaseInput
-            v-if="wxLoginStore.useProxyMode"
-            v-model="wxLoginStore.config.proxyApiUrl"
-            label="第三方API地址"
-            placeholder="https://api.aineishe.com/api/wxnc"
-          />
-
-          <div v-if="wxLoginStore.useProxyMode" class="rounded bg-blue-50 p-2 text-xs text-blue-600">
-            当前使用代理模式，请求将通过后端转发到第三方API
-          </div>
-          <div v-else class="rounded bg-gray-50 p-2 text-xs text-gray-500">
-            当前使用本地API模式，直接请求本地服务
-          </div>
-
-          <div class="flex justify-end pt-4">
-            <BaseButton variant="primary" @click="saveWxConfig">
-              保存并返回
-            </BaseButton>
           </div>
         </div>
 

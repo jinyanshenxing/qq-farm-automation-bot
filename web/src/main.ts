@@ -37,7 +37,8 @@ if (theme) {
   document.documentElement.style.setProperty('--theme-gradient', theme.gradient)
   if (theme.isDark) {
     document.documentElement.classList.add('dark')
-  } else {
+  }
+  else {
     document.documentElement.classList.remove('dark')
   }
 }

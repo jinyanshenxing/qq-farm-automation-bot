@@ -3,21 +3,56 @@ const process = require('node:process');
  * 配置常量与枚举定义
  */
 
-const CONFIG = {
+const DEFAULT_SYSTEM_CONFIG = {
     serverUrl: 'wss://gate-obt.nqf.qq.com/prod/ws',
     clientVersion: '1.7.0.6_20260313',
-    platform: 'qq',              // 平台: qq 或 wx (可通过 --wx 切换为微信)
+    platform: 'qq',
     os: 'iOS',
-    heartbeatInterval: 25000,    // 心跳间隔 25秒
-    farmCheckInterval: 3000,      // 兼容旧逻辑：自己农场固定巡查间隔(ms)
-    friendCheckInterval: 12000,   // 兼容旧逻辑：好友固定巡查间隔(ms)
-    farmCheckIntervalMin: 3000,   // 新逻辑：农场巡查间隔最小值(ms)
-    farmCheckIntervalMax: 5000,   // 新逻辑：农场巡查间隔最大值(ms)
-    friendCheckIntervalMin: 12000,// 新逻辑：好友巡查间隔最小值(ms)
-    friendCheckIntervalMax: 15000,// 新逻辑：好友巡查间隔最大值(ms)
-    adminPort: Number(process.env.ADMIN_PORT), // 管理面板 HTTP 端口
+};
+
+const CONFIG = {
+    serverUrl: DEFAULT_SYSTEM_CONFIG.serverUrl,
+    clientVersion: DEFAULT_SYSTEM_CONFIG.clientVersion,
+    platform: DEFAULT_SYSTEM_CONFIG.platform,
+    os: DEFAULT_SYSTEM_CONFIG.os,
+    heartbeatInterval: 25000,
+    farmCheckInterval: 3000,
+    friendCheckInterval: 12000,
+    farmCheckIntervalMin: 3000,
+    farmCheckIntervalMax: 5000,
+    friendCheckIntervalMin: 12000,
+    friendCheckIntervalMax: 15000,
+    adminPort: Number(process.env.ADMIN_PORT),
     adminPassword: process.env.ADMIN_PASSWORD,
 };
+
+function updateRuntimeConfig(newConfig) {
+    if (newConfig.serverUrl && typeof newConfig.serverUrl === 'string') {
+        CONFIG.serverUrl = newConfig.serverUrl;
+    }
+    if (newConfig.clientVersion && typeof newConfig.clientVersion === 'string') {
+        CONFIG.clientVersion = newConfig.clientVersion;
+    }
+    if (newConfig.platform && typeof newConfig.platform === 'string') {
+        CONFIG.platform = newConfig.platform;
+    }
+    if (newConfig.os && typeof newConfig.os === 'string') {
+        CONFIG.os = newConfig.os;
+    }
+}
+
+function getRuntimeConfig() {
+    return {
+        serverUrl: CONFIG.serverUrl,
+        clientVersion: CONFIG.clientVersion,
+        platform: CONFIG.platform,
+        os: CONFIG.os,
+    };
+}
+
+function getDefaultSystemConfig() {
+    return { ...DEFAULT_SYSTEM_CONFIG };
+}
 
 // 生长阶段枚举
 const PlantPhase = {
@@ -33,4 +68,4 @@ const PlantPhase = {
 
 const PHASE_NAMES = ['未知', '种子', '发芽', '小叶', '大叶', '开花', '成熟', '枯死'];
 
-module.exports = { CONFIG, PlantPhase, PHASE_NAMES };
+module.exports = { CONFIG, PlantPhase, PHASE_NAMES, updateRuntimeConfig, getRuntimeConfig, getDefaultSystemConfig };

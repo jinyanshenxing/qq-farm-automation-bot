@@ -20,7 +20,7 @@ function ensureKnownFriendGidsDir() {
 }
 
 function getKnownFriendGidsCacheFile(accountId) {
-    const safeId = String(accountId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeId = String(accountId || '').replace(/[^\w-]/g, '_');
     return path.join(ensureKnownFriendGidsDir(), `${safeId}.json`);
 }
 
@@ -136,6 +136,7 @@ const DEFAULT_ACCOUNT_CONFIG = {
         fertilizer_land_types: [...DEFAULT_FERTILIZER_LAND_TYPES],
         fertilizer_smart_seconds: 300,
         skip_own_weed_bug: true,  // 不除自己草虫
+        fast_harvest: false,  // 秒收取开关
     },
     plantingStrategy: 'max_exp',
     preferredSeedId: 0,
@@ -173,6 +174,8 @@ const DEFAULT_ACCOUNT_CONFIG = {
     plantOrderRandom: true,
     // 自己农田种植时每块地间隔秒数（0=使用默认50ms）
     plantDelaySeconds: 2,
+    // 秒收取提前时间（毫秒），默认提前200ms发起请求
+    fastHarvestAdvanceMs: 200,
     // 化肥购买类型：organic（有机）或 normal（无机）
     fertilizerBuyType: 'normal',
     // 化肥购买数量（0=不限制，购买到点券不足为止）
@@ -212,6 +215,10 @@ const globalConfig = {
     },
     // 用户已读公告记录: { [username]: updatedAt }
     announcementReadRecords: {},
+    // 系统运行配置
+    systemConfig: null,
+    // 全局微信配置
+    globalWxConfig: null,
 };
 
 function normalizeOfflineReminder(input) {
@@ -313,6 +320,7 @@ function cloneAccountConfig(base = DEFAULT_ACCOUNT_CONFIG) {
         stealDelaySeconds: Math.max(0, Math.min(300, Number(base.stealDelaySeconds) || 0)),
         plantOrderRandom: !!(base.plantOrderRandom),
         plantDelaySeconds: Math.max(0, Math.min(60, Number(base.plantDelaySeconds) || 0)),
+        fastHarvestAdvanceMs: Math.max(50, Math.min(1000, Number(base.fastHarvestAdvanceMs) || 200)),
         fertilizerBuyType,
         fertilizerBuyCount: Math.max(0, Math.min(10000, Number(base.fertilizerBuyCount) || 0)),
         bagSeedPriority: normalizeBagSeedPriority(base.bagSeedPriority),
@@ -407,6 +415,11 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
     // 种植延迟
     if (src.plantDelaySeconds !== undefined && src.plantDelaySeconds !== null) {
         cfg.plantDelaySeconds = Math.max(0, Math.min(60, Number(src.plantDelaySeconds) || 0));
+    }
+
+    // 秒收取提前时间
+    if (src.fastHarvestAdvanceMs !== undefined && src.fastHarvestAdvanceMs !== null) {
+        cfg.fastHarvestAdvanceMs = Math.max(50, Math.min(1000, Number(src.fastHarvestAdvanceMs) || 200));
     }
 
     // 化肥购买类型
@@ -534,6 +547,29 @@ function loadGlobalConfig() {
             // 加载公告已读记录
             if (data.announcementReadRecords && typeof data.announcementReadRecords === 'object') {
                 globalConfig.announcementReadRecords = { ...data.announcementReadRecords };
+            }
+
+            // 加载系统运行配置
+            if (data.systemConfig && typeof data.systemConfig === 'object') {
+                globalConfig.systemConfig = {
+                    serverUrl: String(data.systemConfig.serverUrl || '').trim(),
+                    clientVersion: String(data.systemConfig.clientVersion || '').trim(),
+                    platform: String(data.systemConfig.platform || 'qq').trim(),
+                    os: String(data.systemConfig.os || 'iOS').trim(),
+                };
+            }
+
+            // 加载全局微信配置
+            if (data.globalWxConfig && typeof data.globalWxConfig === 'object') {
+                globalConfig.globalWxConfig = {
+                    enabled: data.globalWxConfig.enabled !== false,
+                    apiBase: String(data.globalWxConfig.apiBase || 'http://127.0.0.1:8059/api').trim(),
+                    apiKey: String(data.globalWxConfig.apiKey || '').trim(),
+                    proxyApiUrl: String(data.globalWxConfig.proxyApiUrl || 'https://api.aineishe.com/api/wxnc').trim(),
+                    appId: String(data.globalWxConfig.appId || 'wx5306c5978fdb76e4').trim(),
+                    autoAddAccount: data.globalWxConfig.autoAddAccount !== false,
+                    userIsolation: data.globalWxConfig.userIsolation !== false,
+                };
             }
         }
     } catch (e) {
@@ -905,6 +941,11 @@ function getPlantDelaySeconds(accountId) {
     return Math.max(0, Math.min(60, Number(getAccountConfigSnapshot(accountId).plantDelaySeconds) || 0));
 }
 
+// ============ 秒收取提前时间 ============
+function getFastHarvestAdvanceMs(accountId) {
+    return Math.max(50, Math.min(1000, Number(getAccountConfigSnapshot(accountId).fastHarvestAdvanceMs) || 200));
+}
+
 // ============ 化肥购买类型 ============
 function getFertilizerBuyType(accountId) {
     const cfg = getAccountConfigSnapshot(accountId);
@@ -1129,6 +1170,62 @@ function shouldShowAnnouncement(username) {
     return readAt < announcement.updatedAt;
 }
 
+function getSystemConfig() {
+    return globalConfig.systemConfig ? { ...globalConfig.systemConfig } : null;
+}
+
+function setSystemConfig(config) {
+    if (!config || typeof config !== 'object') return null;
+    globalConfig.systemConfig = {
+        serverUrl: String(config.serverUrl || '').trim(),
+        clientVersion: String(config.clientVersion || '').trim(),
+        platform: String(config.platform || 'qq').trim(),
+        os: String(config.os || 'iOS').trim(),
+    };
+    saveGlobalConfig();
+    return { ...globalConfig.systemConfig };
+}
+
+const DEFAULT_WX_CONFIG = {
+    enabled: true,
+    apiBase: 'http://127.0.0.1:8059/api',
+    apiKey: '',
+    proxyApiUrl: 'https://api.aineishe.com/api/wxnc',
+    appId: 'wx5306c5978fdb76e4',
+    autoAddAccount: true,
+    userIsolation: true,
+};
+
+function getGlobalWxConfig() {
+    return globalConfig.globalWxConfig ? { ...globalConfig.globalWxConfig } : { ...DEFAULT_WX_CONFIG };
+}
+
+function setGlobalWxConfig(config) {
+    if (!config || typeof config !== 'object') return null;
+    globalConfig.globalWxConfig = {
+        enabled: config.enabled !== false,
+        apiBase: String(config.apiBase || DEFAULT_WX_CONFIG.apiBase).trim(),
+        apiKey: String(config.apiKey || '').trim(),
+        proxyApiUrl: String(config.proxyApiUrl || DEFAULT_WX_CONFIG.proxyApiUrl).trim(),
+        appId: String(config.appId || DEFAULT_WX_CONFIG.appId).trim(),
+        autoAddAccount: config.autoAddAccount !== false,
+        userIsolation: config.userIsolation !== false,
+    };
+    saveGlobalConfig();
+    return { ...globalConfig.globalWxConfig };
+}
+
+function getFastHarvestConfig(accountId) {
+    const cfg = getAccountConfigSnapshot(accountId);
+    const automation = cfg.automation || {};
+    return {
+        enabled: !!automation.fast_harvest,
+        advanceMs: Math.max(50, Math.min(1000, Number(cfg.fastHarvestAdvanceMs) || 200)),
+        fertilizerStrategy: automation.fertilizer || 'none',
+        fertilizerSmartSeconds: Math.max(30, Math.min(3600, Number(automation.fertilizer_smart_seconds) || 300)),
+    };
+}
+
 module.exports = {
     getConfigSnapshot,
     applyConfigSnapshot,
@@ -1151,6 +1248,7 @@ module.exports = {
     getStealDelaySeconds,
     getPlantOrderRandom,
     getPlantDelaySeconds,
+    getFastHarvestAdvanceMs,
     getFertilizerBuyType,
     getFertilizerBuyCount,
     getUI,
@@ -1178,4 +1276,13 @@ module.exports = {
     getAnnouncementReadRecord,
     markAnnouncementRead,
     shouldShowAnnouncement,
+    // 系统配置
+    getSystemConfig,
+    setSystemConfig,
+    // 全局微信配置
+    getGlobalWxConfig,
+    setGlobalWxConfig,
+    DEFAULT_WX_CONFIG,
+    // 秒收取配置
+    getFastHarvestConfig,
 };

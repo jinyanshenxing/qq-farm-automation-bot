@@ -24,7 +24,7 @@ const emit = defineEmits<{
       <h3 class="mb-3 text-xl text-gray-900 font-bold dark:text-gray-100">
         {{ title || '确认操作' }}
       </h3>
-      <p class="mb-8 text-gray-600 leading-relaxed dark:text-gray-400 whitespace-pre-line">
+      <p class="mb-8 whitespace-pre-line text-gray-600 leading-relaxed dark:text-gray-400">
         {{ message || '确定要执行此操作吗？' }}
       </p>
       <div class="flex justify-end gap-3">

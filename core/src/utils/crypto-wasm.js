@@ -7,8 +7,8 @@ let decryptRaw = null;
 let generateTokenRaw = null;
 let createBufRaw = null;
 let destroyBufRaw = null;
-let encoder = new TextEncoder();
-let decoder = new TextDecoder();
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 let initPromise = null;
 

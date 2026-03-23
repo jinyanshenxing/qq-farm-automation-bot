@@ -4,12 +4,263 @@ const crypto = require('crypto');
 
 const USERS_FILE = getDataFile('users.json');
 const CARDS_FILE = getDataFile('cards.json');
+const LOGIN_ATTEMPTS_FILE = getDataFile('login-attempts.json');
+const LOGIN_LOGS_FILE = getDataFile('login-logs.json');
 
 const DEFAULT_ACCOUNT_LIMIT = 1;
 
-const hashPassword = (password) => {
-    return crypto.createHash('sha256').update(password).digest('hex');
-};
+const SALT_LENGTH = 32;
+const ITERATIONS = 100000;
+const KEY_LENGTH = 64;
+const DIGEST = 'sha512';
+
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION = 15 * 60 * 1000;
+const RATE_LIMIT_WINDOW = 60 * 1000;
+const MAX_ATTEMPTS_PER_IP = 10;
+
+let loginAttempts = {};
+let loginLogs = [];
+
+function loadLoginLogs() {
+    try {
+        ensureDataDir();
+        if (fs.existsSync(LOGIN_LOGS_FILE)) {
+            const data = JSON.parse(fs.readFileSync(LOGIN_LOGS_FILE, 'utf8'));
+            loginLogs = Array.isArray(data.logs) ? data.logs : [];
+        }
+    } catch (e) {
+        loginLogs = [];
+    }
+}
+
+function saveLoginLogs() {
+    try {
+        ensureDataDir();
+        const maxLogs = 1000;
+        const logsToSave = loginLogs.slice(-maxLogs);
+        fs.writeFileSync(LOGIN_LOGS_FILE, JSON.stringify({ logs: logsToSave }, null, 2), 'utf8');
+    } catch (e) {
+        console.error('保存登录日志失败:', e.message);
+    }
+}
+
+function addLoginLog(entry) {
+    loadLoginLogs();
+    const logEntry = {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        timestamp: Date.now(),
+        ...entry
+    };
+    loginLogs.push(logEntry);
+    if (loginLogs.length > 1000) {
+        loginLogs = loginLogs.slice(-1000);
+    }
+    saveLoginLogs();
+    return logEntry;
+}
+
+function getLoginLogs(limit = 100, offset = 0) {
+    loadLoginLogs();
+    const sorted = [...loginLogs].sort((a, b) => b.timestamp - a.timestamp);
+    return {
+        logs: sorted.slice(offset, offset + limit),
+        total: loginLogs.length
+    };
+}
+
+function clearLoginLogs() {
+    loginLogs = [];
+    saveLoginLogs();
+    return { ok: true };
+}
+
+function loadLoginAttempts() {
+    try {
+        ensureDataDir();
+        if (fs.existsSync(LOGIN_ATTEMPTS_FILE)) {
+            const data = JSON.parse(fs.readFileSync(LOGIN_ATTEMPTS_FILE, 'utf8'));
+            loginAttempts = data || {};
+        }
+    } catch (e) {
+        loginAttempts = {};
+    }
+}
+
+function saveLoginAttempts() {
+    try {
+        ensureDataDir();
+        fs.writeFileSync(LOGIN_ATTEMPTS_FILE, JSON.stringify(loginAttempts, null, 2), 'utf8');
+    } catch (e) {
+        console.error('保存登录尝试记录失败:', e.message);
+    }
+}
+
+function cleanExpiredAttempts() {
+    const now = Date.now();
+    let cleaned = false;
+    
+    for (const key of Object.keys(loginAttempts)) {
+        const attempt = loginAttempts[key];
+        if (attempt.lockedUntil && attempt.lockedUntil < now) {
+            delete loginAttempts[key];
+            cleaned = true;
+        } else if (attempt.windowStart && (now - attempt.windowStart) > RATE_LIMIT_WINDOW) {
+            delete loginAttempts[key];
+            cleaned = true;
+        }
+    }
+    
+    if (cleaned) saveLoginAttempts();
+}
+
+function checkRateLimit(ip) {
+    cleanExpiredAttempts();
+    const ipKey = `ip:${ip}`;
+    const now = Date.now();
+    
+    if (!loginAttempts[ipKey]) {
+        loginAttempts[ipKey] = { count: 1, windowStart: now };
+        saveLoginAttempts();
+        return { allowed: true };
+    }
+    
+    const attempt = loginAttempts[ipKey];
+    
+    if (now - attempt.windowStart > RATE_LIMIT_WINDOW) {
+        loginAttempts[ipKey] = { count: 1, windowStart: now };
+        saveLoginAttempts();
+        return { allowed: true };
+    }
+    
+    if (attempt.count >= MAX_ATTEMPTS_PER_IP) {
+        const remainingMs = RATE_LIMIT_WINDOW - (now - attempt.windowStart);
+        return { 
+            allowed: false, 
+            remainingMs,
+            message: `请求过于频繁，请 ${Math.ceil(remainingMs / 1000)} 秒后重试`
+        };
+    }
+    
+    attempt.count++;
+    saveLoginAttempts();
+    return { allowed: true };
+}
+
+function checkAccountLockout(username) {
+    cleanExpiredAttempts();
+    const userKey = `user:${username}`;
+    const now = Date.now();
+    
+    if (loginAttempts[userKey] && loginAttempts[userKey].lockedUntil) {
+        if (loginAttempts[userKey].lockedUntil > now) {
+            const remainingMs = loginAttempts[userKey].lockedUntil - now;
+            return {
+                locked: true,
+                remainingMs,
+                message: `账户已被锁定，请 ${Math.ceil(remainingMs / 1000 / 60)} 分钟后重试`
+            };
+        } else {
+            delete loginAttempts[userKey];
+            saveLoginAttempts();
+        }
+    }
+    
+    return { locked: false };
+}
+
+function recordFailedAttempt(username) {
+    const userKey = `user:${username}`;
+    const now = Date.now();
+    
+    if (!loginAttempts[userKey]) {
+        loginAttempts[userKey] = { count: 1, firstAttempt: now };
+    } else {
+        loginAttempts[userKey].count++;
+        loginAttempts[userKey].lastAttempt = now;
+    }
+    
+    if (loginAttempts[userKey].count >= MAX_LOGIN_ATTEMPTS) {
+        loginAttempts[userKey].lockedUntil = now + LOCKOUT_DURATION;
+        saveLoginAttempts();
+        return {
+            locked: true,
+            message: `登录失败次数过多，账户已被锁定 ${LOCKOUT_DURATION / 60000} 分钟`
+        };
+    }
+    
+    saveLoginAttempts();
+    return {
+        locked: false,
+        remainingAttempts: MAX_LOGIN_ATTEMPTS - loginAttempts[userKey].count
+    };
+}
+
+function clearFailedAttempts(username) {
+    const userKey = `user:${username}`;
+    if (loginAttempts[userKey]) {
+        delete loginAttempts[userKey];
+        saveLoginAttempts();
+    }
+}
+
+function validatePasswordStrength(password) {
+    const errors = [];
+    
+    if (password.length < 6) {
+        errors.push('密码长度至少6位');
+    }
+    
+    if (password.length > 128) {
+        errors.push('密码长度不能超过128位');
+    }
+    
+    let typeCount = 0;
+    if (/[a-z]/.test(password)) typeCount++;
+    if (/[A-Z]/.test(password)) typeCount++;
+    if (/\d/.test(password)) typeCount++;
+    if (/[!@#$%^&*(),.?":{}|<>_\-+=[\]\\;'/`~]/.test(password)) typeCount++;
+    
+    if (typeCount < 2) {
+        errors.push('密码必须包含大写字母、小写字母、数字、特殊符号中的至少两种');
+    }
+    
+    const commonPasswords = [
+        'password', '123456', 'qwerty', 'abc123', '111111', '000000'
+    ];
+    if (commonPasswords.includes(password.toLowerCase())) {
+        errors.push('密码过于简单，请使用更复杂的密码');
+    }
+    
+    return {
+        valid: errors.length === 0,
+        errors
+    };
+}
+
+function hashPassword(password, salt = null) {
+    if (!salt) {
+        salt = crypto.randomBytes(SALT_LENGTH).toString('hex');
+    }
+    
+    const hash = crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_LENGTH, DIGEST).toString('hex');
+    return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedPassword) {
+    if (storedPassword.includes(':')) {
+        const [salt, hash] = storedPassword.split(':');
+        const newHash = crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_LENGTH, DIGEST).toString('hex');
+        return hash === newHash;
+    } else {
+        const legacyHash = crypto.createHash('sha256').update(password).digest('hex');
+        return storedPassword === legacyHash;
+    }
+}
+
+function needsRehash(storedPassword) {
+    return !storedPassword.includes(':');
+}
 
 const generateCardCode = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -81,21 +332,64 @@ function initDefaultAdmin() {
         users.push({
             username: 'admin',
             password: hashPassword(defaultPassword),
-            plainPassword: defaultPassword,
             role: 'admin',
             createdAt: Date.now()
         });
         saveUsers();
-        console.log('[用户系统] 已创建默认管理员账号');
+        console.log('[用户系统] 已创建默认管理员账号，默认密码: admin');
     }
 }
 
-function validateUser(username, password) {
+function validateUser(username, password, ip = 'unknown') {
     loadUsers();
+    loadLoginAttempts();
+    
+    const rateLimitResult = checkRateLimit(ip);
+    if (!rateLimitResult.allowed) {
+        return { 
+            error: 'rate_limit', 
+            message: rateLimitResult.message,
+            remainingMs: rateLimitResult.remainingMs
+        };
+    }
+    
+    const lockoutResult = checkAccountLockout(username);
+    if (lockoutResult.locked) {
+        return { 
+            error: 'locked', 
+            message: lockoutResult.message,
+            remainingMs: lockoutResult.remainingMs
+        };
+    }
+    
     const user = users.find(u => u.username === username);
-    if (!user) return null;
-    if (user.password !== hashPassword(password)) return null;
-
+    if (!user) {
+        recordFailedAttempt(username);
+        return { error: 'invalid_credentials', message: '用户名或密码错误' };
+    }
+    
+    if (!verifyPassword(password, user.password)) {
+        const attemptResult = recordFailedAttempt(username);
+        if (attemptResult.locked) {
+            return { 
+                error: 'locked', 
+                message: attemptResult.message 
+            };
+        }
+        return { 
+            error: 'invalid_credentials', 
+            message: `用户名或密码错误，剩余尝试次数: ${attemptResult.remainingAttempts}` 
+        };
+    }
+    
+    clearFailedAttempts(username);
+    
+    if (needsRehash(user.password)) {
+        user.password = hashPassword(password);
+        saveUsers();
+        console.log(`[安全] 用户 ${username} 密码已升级为新哈希算法`);
+    }
+    
     return {
         username: user.username,
         role: user.role,
@@ -109,8 +403,21 @@ function registerUser(username, password, cardCode) {
     loadUsers();
     loadCards();
 
+    if (!username || username.length < 3 || username.length > 32) {
+        return { ok: false, error: '用户名长度需在3-32位之间' };
+    }
+
+    if (!/^\w+$/.test(username)) {
+        return { ok: false, error: '用户名只能包含字母、数字和下划线' };
+    }
+
     if (users.find(u => u.username === username)) {
         return { ok: false, error: '用户名已存在' };
+    }
+
+    const passwordValidation = validatePasswordStrength(password);
+    if (!passwordValidation.valid) {
+        return { ok: false, error: passwordValidation.errors.join('；') };
     }
 
     const card = cards.find(c => c.code === cardCode);
@@ -126,7 +433,6 @@ function registerUser(username, password, cardCode) {
         return { ok: false, error: '卡密已被使用' };
     }
 
-    // 注册只允许使用时间卡密
     const cardType = card.type || 'time';
     if (cardType === 'quota') {
         return { ok: false, error: '注册只能使用时间卡密，额度卡密请登录后在续费中使用' };
@@ -137,7 +443,6 @@ function registerUser(username, password, cardCode) {
     const newUser = {
         username,
         password: hashPassword(password),
-        plainPassword: password,
         role: 'user',
         cardCode,
         card: {
@@ -249,17 +554,6 @@ function getAllUsers() {
     }));
 }
 
-function getAllUsersWithPassword() {
-    loadUsers();
-    return users.map(u => ({
-        username: u.username,
-        password: u.plainPassword || '',
-        role: u.role,
-        card: u.card,
-        accountLimit: u.accountLimit || DEFAULT_ACCOUNT_LIMIT
-    }));
-}
-
 function updateUser(username, updates) {
     loadUsers();
     const user = users.find(u => u.username === username);
@@ -288,8 +582,10 @@ function editUser(oldUsername, updates) {
         return { ok: false, error: '用户不存在' };
     }
 
-    // 检查新用户名是否已被使用
     if (updates.newUsername && updates.newUsername !== oldUsername) {
+        if (!/^\w{3,32}$/.test(updates.newUsername)) {
+            return { ok: false, error: '用户名只能包含字母、数字和下划线，长度3-32位' };
+        }
         const existingUser = users.find(u => u.username === updates.newUsername);
         if (existingUser) {
             return { ok: false, error: '用户名已存在' };
@@ -297,18 +593,18 @@ function editUser(oldUsername, updates) {
         user.username = updates.newUsername;
     }
 
-    // 更新密码
     if (updates.password) {
+        const passwordValidation = validatePasswordStrength(updates.password);
+        if (!passwordValidation.valid) {
+            return { ok: false, error: passwordValidation.errors.join('；') };
+        }
         user.password = hashPassword(updates.password);
-        user.plainPassword = updates.password;
     }
 
-    // 更新额度
     if (updates.accountLimit !== undefined) {
         user.accountLimit = Number.parseInt(updates.accountLimit, 10) || DEFAULT_ACCOUNT_LIMIT;
     }
 
-    // 更新过期时间
     if (updates.isPermanent) {
         if (!user.card) user.card = {};
         user.card.days = -1;
@@ -322,7 +618,6 @@ function editUser(oldUsername, updates) {
             const now = Date.now();
             const expiresAt = Number.parseInt(updates.expiresAt, 10);
             user.card.expiresAt = expiresAt;
-            // 计算剩余天数
             const diffMs = expiresAt - now;
             const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
             user.card.days = diffDays > 0 ? diffDays : 0;
@@ -450,13 +745,13 @@ function deleteCardsBatch(codes) {
     };
 }
 
-function deleteUser(username) {
+function deleteUser(username, forceDeleteAdmin = false) {
     loadUsers();
     const idx = users.findIndex(u => u.username === username);
     if (idx === -1) return { ok: false, error: '用户不存在' };
 
-    // 不允许删除管理员账号
-    if (users[idx].role === 'admin') {
+    // 不允许删除管理员账号（除非强制删除）
+    if (!forceDeleteAdmin && users[idx].role === 'admin') {
         return { ok: false, error: '不能删除管理员账号' };
     }
 
@@ -472,14 +767,19 @@ function changePassword(username, oldPassword, newPassword) {
         return { ok: false, error: '用户不存在' };
     }
 
-    // 验证当前密码
-    if (user.password !== hashPassword(oldPassword)) {
+    if (!verifyPassword(oldPassword, user.password)) {
         return { ok: false, error: '当前密码错误' };
     }
 
-    // 更新密码
+    const passwordValidation = validatePasswordStrength(newPassword);
+    if (!passwordValidation.valid) {
+        return { ok: false, error: passwordValidation.errors.join('；') };
+    }
+
     user.password = hashPassword(newPassword);
-    user.plainPassword = newPassword;
+    if (user.mustChangePassword) {
+        delete user.mustChangePassword;
+    }
 
     saveUsers();
     return { ok: true, message: '密码修改成功' };
@@ -548,7 +848,6 @@ module.exports = {
     registerUser,
     renewUser,
     getAllUsers,
-    getAllUsersWithPassword,
     updateUser,
     editUser,
     getAllCards,
@@ -563,5 +862,12 @@ module.exports = {
     getWxLoginConfig,
     getUserAccountLimit,
     canAddAccount,
-    DEFAULT_ACCOUNT_LIMIT
+    DEFAULT_ACCOUNT_LIMIT,
+    validatePasswordStrength,
+    checkRateLimit,
+    checkAccountLockout,
+    clearFailedAttempts,
+    addLoginLog,
+    getLoginLogs,
+    clearLoginLogs
 };

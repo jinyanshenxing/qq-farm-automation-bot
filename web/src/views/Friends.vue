@@ -2,13 +2,13 @@
 import { useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
+import api from '@/api'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import LandCard from '@/components/LandCard.vue'
 import { useAccountStore } from '@/stores/account'
 import { useFriendStore } from '@/stores/friend'
 import { useStatusStore } from '@/stores/status'
 import { useToastStore } from '@/stores/toast'
-import api from '@/api'
 
 const accountStore = useAccountStore()
 const friendStore = useFriendStore()
@@ -33,7 +33,8 @@ const { status, loading: statusLoading, realtimeConnected } = storeToRefs(status
 
 const isQqAccount = computed(() => {
   const acc = currentAccount.value
-  if (!acc) return false
+  if (!acc)
+    return false
   const platform = String(acc.platform || 'qq').toLowerCase()
   return platform === 'qq'
 })
@@ -41,6 +42,7 @@ const isQqAccount = computed(() => {
 const knownFriendGidCount = computed(() => knownFriendGids.value.length)
 const knownFriendGidSet = computed(() => new Set(knownFriendGids.value.map(Number)))
 const friendGidSet = computed(() => new Set(friends.value.map(f => Number(f.gid))))
+const blacklistGidSet = computed(() => new Set(blacklist.value.map(item => Number(item.gid))))
 
 const filteredKnownFriendGids = computed(() => {
   const keyword = gidSearchKeyword.value.trim().toLowerCase()
@@ -48,7 +50,8 @@ const filteredKnownFriendGids = computed(() => {
     gid: Number(gid),
     synced: friendGidSet.value.has(Number(gid)),
   }))
-  if (!keyword) return list
+  if (!keyword)
+    return list
   return list.filter(item => String(item.gid).includes(keyword))
 })
 
@@ -56,12 +59,14 @@ const syncedGidCount = computed(() => filteredKnownFriendGids.value.filter(item 
 const unsyncedGidCount = computed(() => filteredKnownFriendGids.value.filter(item => !item.synced).length)
 
 async function handleRemoveGidFromList(gid: number) {
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   await friendStore.removeKnownFriendGid(currentAccountId.value, gid)
 }
 
 async function handleRemoveUnsyncedGids() {
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   const unsyncedGids = filteredKnownFriendGids.value.filter(item => !item.synced).map(item => item.gid)
   if (unsyncedGids.length === 0) {
     toast.info('没有需要删除的未同步 GID')
@@ -232,12 +237,14 @@ watch(currentAccountId, () => {
 })
 
 async function handleRefreshFriends() {
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   try {
     await api.post('/api/friends/clear-cache', {}, {
       headers: { 'x-account-id': currentAccountId.value },
     })
-  } catch {
+  }
+  catch {
     // ignore
   }
   await friendStore.fetchFriends(currentAccountId.value, true)
@@ -337,11 +344,6 @@ function handleFriendAvatarError(friend: any) {
   avatarErrorKeys.value.add(key)
 }
 
-function getFriendNameByGid(gid: number) {
-  const friend = friends.value.find((f: any) => Number(f.gid) === gid)
-  return friend?.name || `GID:${gid}`
-}
-
 async function handleRemoveFromBlacklist(gid: number) {
   if (!currentAccountId.value)
     return
@@ -437,8 +439,8 @@ function formatInteractTime(timestamp: number) {
     return `${Math.floor(diff / minute)} 分钟前`
 
   const sameDay = now.getFullYear() === date.getFullYear()
-      && now.getMonth() === date.getMonth()
-      && now.getDate() === date.getDate()
+    && now.getMonth() === date.getMonth()
+    && now.getDate() === date.getDate()
 
   if (sameDay) {
     return `今天 ${date.toLocaleTimeString('zh-CN', {
@@ -468,12 +470,14 @@ function formatInteractTime(timestamp: number) {
 
 function normalizeKnownFriendGidSyncCooldownSec(value: number) {
   const v = Number.parseInt(String(value || ''), 10)
-  if (!Number.isFinite(v) || v <= 0) return 600
+  if (!Number.isFinite(v) || v <= 0)
+    return 600
   return Math.max(30, Math.min(86400, v))
 }
 
 async function handleAddKnownFriendGid() {
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   const gid = Number.parseInt(String(newKnownFriendGid.value || ''), 10)
   if (!Number.isFinite(gid) || gid <= 0) {
     toast.error('请输入有效的 GID')
@@ -488,7 +492,8 @@ async function handleAddKnownFriendGid() {
 
 async function handleRemoveKnownFriendGid(friend: any, e: Event) {
   e.stopPropagation()
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   const gid = Number(friend?.gid) || 0
   const name = String(friend?.name || `GID ${gid}`).trim()
   confirmAction(
@@ -502,12 +507,14 @@ async function handleRemoveKnownFriendGid(friend: any, e: Event) {
 }
 
 async function refreshFriendsAfterKnownGidChange() {
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   await friendStore.fetchFriends(currentAccountId.value, true)
 }
 
 async function handleSaveKnownFriendSettings() {
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   const cooldownSec = normalizeKnownFriendGidSyncCooldownSec(localKnownFriendGidSyncCooldownSec.value)
   await friendStore.saveKnownFriendSettings(currentAccountId.value, {
     knownFriendGidSyncCooldownSec: cooldownSec,
@@ -521,9 +528,10 @@ watch(knownFriendGidSyncCooldownSec, (val) => {
 
 function parseBatchGids(input: string): number[] {
   const text = String(input || '').trim()
-  if (!text) return []
+  if (!text)
+    return []
   const gids: number[] = []
-  const parts = text.split(/[\n,，\s]+/).map(s => s.trim()).filter(Boolean)
+  const parts = text.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean)
   for (const part of parts) {
     const num = Number.parseInt(part, 10)
     if (Number.isFinite(num) && num > 0 && !gids.includes(num)) {
@@ -534,7 +542,8 @@ function parseBatchGids(input: string): number[] {
 }
 
 async function handleBatchAddKnownFriendGids() {
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
   const gids = parseBatchGids(batchGidInput.value)
   if (gids.length === 0) {
     toast.error('请输入有效的 GID 列表')
@@ -585,7 +594,7 @@ async function handleBatchAddKnownFriendGids() {
         :key="tab.key"
         class="flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors"
         :class="activeTab === tab.key
-          ? 'border-b-2 text-blue-600 dark:text-blue-400'
+          ? 'border-b-2'
           : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
         :style="{ borderColor: activeTab === tab.key ? 'var(--theme-primary)' : 'transparent', color: activeTab === tab.key ? 'var(--theme-primary)' : undefined }"
         @click="activeTab = tab.key"
@@ -640,7 +649,7 @@ async function handleBatchAddKnownFriendGids() {
                   QQ 好友自动同步
                 </h3>
                 <button
-                  class="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 transition cursor-pointer dark:bg-amber-900/30 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50"
+                  class="cursor-pointer rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 transition dark:bg-amber-900/30 hover:bg-amber-200 dark:text-amber-400 dark:hover:bg-amber-900/50"
                   @click="openGidListModal"
                 >
                   {{ knownFriendGidCount }}
@@ -676,14 +685,14 @@ async function handleBatchAddKnownFriendGids() {
             </div>
           </div>
 
-          <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
+          <div class="grid mt-4 gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
             <div>
               <label class="mb-1 block text-xs text-gray-500 dark:text-gray-400">新增 GID</label>
               <input
                 v-model="newKnownFriendGid"
                 type="number"
                 placeholder="输入好友 GID"
-                class="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                class="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm dark:border-gray-600 focus:border-blue-500 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
             </div>
             <div>
@@ -692,7 +701,7 @@ async function handleBatchAddKnownFriendGids() {
                 v-model.number="localKnownFriendGidSyncCooldownSec"
                 type="number"
                 placeholder="600"
-                class="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                class="w-full border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm dark:border-gray-600 focus:border-blue-500 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
             </div>
             <div class="flex items-end">
@@ -740,7 +749,7 @@ async function handleBatchAddKnownFriendGids() {
             </button>
             <div class="flex-1" />
             <button
-              class="rounded bg-gray-100 px-3 py-1.5 text-sm text-gray-600 transition dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
+              class="rounded bg-gray-100 px-3 py-1.5 text-sm text-gray-600 transition dark:bg-gray-700 hover:bg-gray-200 dark:text-gray-300 disabled:opacity-50 dark:hover:bg-gray-600"
               :disabled="loading"
               @click="handleRefreshFriends"
             >
@@ -756,7 +765,7 @@ async function handleBatchAddKnownFriendGids() {
           >
             <div
               class="flex flex-col cursor-pointer justify-between gap-4 p-4 transition sm:flex-row sm:items-center hover:bg-gray-50 dark:hover:bg-gray-700/50"
-              :class="blacklist.includes(Number(friend.gid)) ? 'opacity-50' : ''"
+              :class="blacklistGidSet.has(Number(friend.gid)) ? 'opacity-50' : ''"
               @click="toggleFriend(friend.gid)"
             >
               <div class="flex items-center gap-3">
@@ -774,20 +783,20 @@ async function handleBatchAddKnownFriendGids() {
                   <div class="flex items-center gap-2 font-bold">
                     {{ friend.name }} ({{ friend.gid }})
 
-                    <span v-if="blacklist.includes(Number(friend.gid))" class="rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-gray-700 dark:text-gray-400">已屏蔽</span>
+                    <span v-if="blacklistGidSet.has(Number(friend.gid))" class="rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-gray-700 dark:text-gray-400">已屏蔽</span>
                   </div>
                   <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                    <span 
-                      v-if="getFriendLevel(friend) > 0" 
-                      class="rounded bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-700 dark:text-gray-300" 
-                    > 
-                      Lv.{{ getFriendLevel(friend) }} 
-                    </span> 
-                    <span 
-                      v-if="getFriendGold(friend) > 0" 
-                      class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" 
-                    > 
-                      金币 {{ formatFriendGold(friend.gold) }} 
+                    <span
+                      v-if="getFriendLevel(friend) > 0"
+                      class="rounded bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-gray-700 dark:text-gray-300"
+                    >
+                      Lv.{{ getFriendLevel(friend) }}
+                    </span>
+                    <span
+                      v-if="getFriendGold(friend) > 0"
+                      class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+                    >
+                      金币 {{ formatFriendGold(friend.gold) }}
                     </span>
                   </div>
                   <div class="text-sm" :class="getFriendStatusText(friend) !== '无操作' ? 'text-green-500 font-medium' : 'text-gray-400'">
@@ -829,16 +838,16 @@ async function handleBatchAddKnownFriendGids() {
                 </button>
                 <button
                   class="rounded px-3 py-2 text-sm transition"
-                  :class="blacklist.includes(Number(friend.gid))
+                  :class="blacklistGidSet.has(Number(friend.gid))
                     ? 'bg-gray-200 text-gray-600 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
                     : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700/50 dark:text-gray-400 dark:hover:bg-gray-700'"
                   @click="handleToggleBlacklist(friend, $event)"
                 >
-                  {{ blacklist.includes(Number(friend.gid)) ? '移出黑名单' : '加入黑名单' }}
+                  {{ blacklistGidSet.has(Number(friend.gid)) ? '移出黑名单' : '加入黑名单' }}
                 </button>
                 <button
                   v-if="isQqAccount && knownFriendGidSet.has(Number(friend.gid))"
-                  class="rounded bg-amber-100 px-3 py-2 text-sm text-amber-700 transition hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50"
+                  class="rounded bg-amber-100 px-3 py-2 text-sm text-amber-700 transition dark:bg-amber-900/30 hover:bg-amber-200 dark:text-amber-400 dark:hover:bg-amber-900/50"
                   @click="handleRemoveKnownFriendGid(friend, $event)"
                 >
                   移出同步列表
@@ -866,14 +875,14 @@ async function handleBatchAddKnownFriendGids() {
           <!-- 分页控件 -->
           <div v-if="filteredFriends.length > pageSize" class="mt-4 flex flex-wrap items-center justify-center gap-2">
             <button
-              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              class="border border-gray-200 rounded bg-white px-3 py-1.5 text-sm text-gray-600 transition dark:border-gray-600 dark:bg-gray-800 hover:bg-gray-50 dark:text-gray-300 disabled:opacity-50 dark:hover:bg-gray-700"
               :disabled="currentPage === 1"
               @click="goToPage(1)"
             >
               首页
             </button>
             <button
-              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              class="border border-gray-200 rounded bg-white px-3 py-1.5 text-sm text-gray-600 transition dark:border-gray-600 dark:bg-gray-800 hover:bg-gray-50 dark:text-gray-300 disabled:opacity-50 dark:hover:bg-gray-700"
               :disabled="currentPage === 1"
               @click="goToPage(currentPage - 1)"
             >
@@ -885,8 +894,9 @@ async function handleBatchAddKnownFriendGids() {
                   v-if="p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1)"
                   class="h-8 w-8 rounded text-sm transition"
                   :class="p === currentPage
-                    ? 'bg-blue-500 text-white'
+                    ? 'text-white'
                     : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'"
+                  :style="p === currentPage ? { backgroundColor: 'var(--theme-primary)' } : {}"
                   @click="goToPage(p)"
                 >
                   {{ p }}
@@ -898,14 +908,14 @@ async function handleBatchAddKnownFriendGids() {
               </template>
             </div>
             <button
-              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              class="border border-gray-200 rounded bg-white px-3 py-1.5 text-sm text-gray-600 transition dark:border-gray-600 dark:bg-gray-800 hover:bg-gray-50 dark:text-gray-300 disabled:opacity-50 dark:hover:bg-gray-700"
               :disabled="currentPage === totalPages"
               @click="goToPage(currentPage + 1)"
             >
               下一页
             </button>
             <button
-              class="rounded border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              class="border border-gray-200 rounded bg-white px-3 py-1.5 text-sm text-gray-600 transition dark:border-gray-600 dark:bg-gray-800 hover:bg-gray-50 dark:text-gray-300 disabled:opacity-50 dark:hover:bg-gray-700"
               :disabled="currentPage === totalPages"
               @click="goToPage(totalPages)"
             >
@@ -932,29 +942,29 @@ async function handleBatchAddKnownFriendGids() {
 
         <div v-else class="space-y-2">
           <div
-            v-for="gid in blacklist"
-            :key="gid"
+            v-for="item in blacklist"
+            :key="item.gid"
             class="flex items-center justify-between rounded-lg bg-white p-4 shadow dark:bg-gray-800"
           >
             <div class="flex items-center gap-3">
               <div class="h-10 w-10 flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 ring-1 ring-gray-100 dark:bg-gray-600 dark:ring-gray-700">
                 <img
-                  v-if="canShowFriendAvatar(friends.find((f: any) => Number(f.gid) === gid))"
-                  :src="getFriendAvatar(friends.find((f: any) => Number(f.gid) === gid))"
+                  v-if="item.avatarUrl"
+                  :src="item.avatarUrl"
                   class="h-full w-full object-cover"
                   loading="lazy"
-                  @error="handleFriendAvatarError(friends.find((f: any) => Number(f.gid) === gid))"
+                  @error="($event.target as HTMLImageElement).style.display = 'none'"
                 >
                 <div v-else class="i-carbon-user text-gray-400" />
               </div>
               <div>
-                <span class="font-medium">{{ getFriendNameByGid(gid) }}</span>
-                <span class="ml-2 text-sm text-gray-400">({{ gid }})</span>
+                <span class="font-medium">{{ item.name || `GID:${item.gid}` }}</span>
+                <span class="ml-2 text-sm text-gray-400">({{ item.gid }})</span>
               </div>
             </div>
             <button
               class="rounded bg-red-100 px-3 py-1.5 text-sm text-red-600 dark:bg-red-900/30 hover:bg-red-200 dark:text-red-400 dark:hover:bg-red-900/50"
-              @click="handleRemoveFromBlacklist(gid)"
+              @click="handleRemoveFromBlacklist(item.gid)"
             >
               移出黑名单
             </button>
@@ -969,14 +979,15 @@ async function handleBatchAddKnownFriendGids() {
             :key="item.key"
             class="rounded-full px-3 py-1 text-xs transition"
             :class="interactFilter === item.key
-              ? 'bg-blue-500 text-white'
+              ? 'text-white'
               : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'"
+            :style="interactFilter === item.key ? { backgroundColor: 'var(--theme-primary)' } : {}"
             @click="interactFilter = item.key"
           >
             {{ item.label }}
           </button>
           <button
-            class="rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 transition dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-60"
+            class="rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 transition disabled:cursor-not-allowed dark:bg-gray-700 hover:bg-gray-200 dark:text-gray-300 disabled:opacity-60 dark:hover:bg-gray-600"
             :disabled="interactLoading"
             @click="refreshInteractRecords"
           >
@@ -1007,7 +1018,7 @@ async function handleBatchAddKnownFriendGids() {
                 loading="lazy"
                 @error="handleInteractAvatarError(record)"
               >
-              <div v-else class="i-carbon-user-avatar text-gray-400 text-xl" />
+              <div v-else class="i-carbon-user-avatar text-xl text-gray-400" />
             </div>
             <div class="min-w-0 flex-1">
               <div class="mb-1 flex flex-wrap items-center gap-2">
@@ -1058,7 +1069,7 @@ async function handleBatchAddKnownFriendGids() {
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
         @click.self="showBatchAddGidModal = false"
       >
-        <div class="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+        <div class="max-w-lg w-full rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
           <h3 class="mb-4 text-lg text-gray-800 font-semibold dark:text-gray-100">
             批量新增 GID
           </h3>
@@ -1069,18 +1080,19 @@ async function handleBatchAddKnownFriendGids() {
             v-model="batchGidInput"
             rows="8"
             placeholder="每行一个 GID，或用逗号、空格分隔&#10;例如：&#10;12345678&#10;87654321&#10;或&#10;12345678, 87654321, 11111111"
-            class="mb-4 w-full border border-gray-300 rounded-lg bg-white p-3 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            class="mb-4 w-full border border-gray-300 rounded-lg bg-white p-3 text-sm dark:border-gray-600 focus:border-blue-500 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
           <div class="flex justify-end gap-3">
             <button
-              class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              class="border border-gray-300 rounded-lg bg-white px-4 py-2 text-sm text-gray-700 transition dark:border-gray-600 dark:bg-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-600"
               @click="showBatchAddGidModal = false"
             >
               取消
             </button>
             <button
-              class="rounded-lg bg-blue-500 px-4 py-2 text-sm text-white transition hover:bg-blue-600 disabled:opacity-50"
+              class="rounded-lg px-4 py-2 text-sm text-white transition disabled:opacity-50"
               :disabled="knownFriendSettingsSaving || !batchGidInput.trim()"
+              :style="{ backgroundColor: 'var(--theme-primary)' }"
               @click="handleBatchAddKnownFriendGids"
             >
               <div v-if="knownFriendSettingsSaving" class="i-svg-spinners-90-ring-with-bg mr-1 inline-block align-text-bottom" />
@@ -1095,7 +1107,7 @@ async function handleBatchAddKnownFriendGids() {
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
         @click.self="showGidListModal = false"
       >
-        <div class="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
+        <div class="max-h-[80vh] max-w-2xl w-full flex flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800">
           <div class="flex shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
             <div>
               <h3 class="text-lg text-gray-800 font-semibold dark:text-gray-100">
@@ -1121,10 +1133,10 @@ async function handleBatchAddKnownFriendGids() {
                 v-model="gidSearchKeyword"
                 type="text"
                 placeholder="搜索 GID..."
-                class="flex-1 border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                class="flex-1 border border-gray-300 rounded-lg bg-white px-3 py-2 text-sm dark:border-gray-600 focus:border-blue-500 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
               <button
-                class="shrink-0 rounded-lg bg-red-100 px-3 py-2 text-sm text-red-700 transition dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50"
+                class="shrink-0 rounded-lg bg-red-100 px-3 py-2 text-sm text-red-700 transition dark:bg-red-900/30 hover:bg-red-200 dark:text-red-400 disabled:opacity-50 dark:hover:bg-red-900/50"
                 :disabled="knownFriendSettingsSaving || unsyncedGidCount === 0"
                 @click="handleRemoveUnsyncedGids"
               >
@@ -1138,15 +1150,15 @@ async function handleBatchAddKnownFriendGids() {
             <div v-if="filteredKnownFriendGids.length === 0" class="py-8 text-center text-gray-500 dark:text-gray-400">
               暂无数据
             </div>
-            <div v-else class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div v-else class="grid gap-2 lg:grid-cols-3 sm:grid-cols-2">
               <div
                 v-for="item in filteredKnownFriendGids"
                 :key="item.gid"
-                class="flex items-center justify-between rounded-lg border p-2 transition"
+                class="flex items-center justify-between border rounded-lg p-2 transition"
                 :class="[
                   item.synced
                     ? 'border-yellow-300 bg-yellow-50 dark:border-yellow-700/50 dark:bg-yellow-900/20'
-                    : 'border-red-300 bg-red-50 dark:border-red-700/50 dark:bg-red-900/20'
+                    : 'border-red-300 bg-red-50 dark:border-red-700/50 dark:bg-red-900/20',
                 ]"
               >
                 <div class="flex items-center gap-2">

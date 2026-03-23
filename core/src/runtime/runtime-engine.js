@@ -3,6 +3,7 @@ const path = require('node:path')
 const process = require('node:process');
 const { Worker } = require('node:worker_threads')
 const store = require('../models/store')
+const { updateRuntimeConfig, getRuntimeConfig, getDefaultSystemConfig } = require('../config/config')
 const { sendPushooMessage } = require('../services/push')
 const { MiniProgramLoginSession } = require('../services/qrlogin')
 const { createDataProvider } = require('./data-provider')
@@ -139,6 +140,13 @@ function createRuntimeEngine(options = {}) {
   async function start(options = {}) {
     const shouldStartAdminServer = options.startAdminServer !== false
     const shouldAutoStartAccounts = options.autoStartAccounts !== false
+
+    // 启动时加载已保存的系统配置
+    const savedSystemConfig = store.getSystemConfig()
+    if (savedSystemConfig) {
+      updateRuntimeConfig(savedSystemConfig)
+      log('系统', `已加载系统配置: serverUrl=${savedSystemConfig.serverUrl}, clientVersion=${savedSystemConfig.clientVersion}, platform=${savedSystemConfig.platform}`)
+    }
 
     if (shouldStartAdminServer && startAdminServer) {
       startAdminServer(dataProvider)

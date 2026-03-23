@@ -17,6 +17,34 @@ const SECURITY_CONFIG = {
     lockoutDuration: 300000,
 };
 
+function getClientIp(req) {
+    const cfIp = req.headers['cf-connecting-ip'];
+    if (cfIp) return cfIp.trim();
+    
+    const xRealIp = req.headers['x-real-ip'];
+    if (xRealIp) return xRealIp.trim();
+    
+    const xForwardedFor = req.headers['x-forwarded-for'];
+    if (xForwardedFor) {
+        const ips = xForwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
+        if (ips.length > 0) return ips[0];
+    }
+    
+    if (req.ip && req.ip !== '::1' && req.ip !== '::ffff:127.0.0.1') {
+        return req.ip;
+    }
+    
+    const remoteAddr = req.connection?.remoteAddress || req.socket?.remoteAddress;
+    if (remoteAddr) {
+        if (remoteAddr.startsWith('::ffff:')) {
+            return remoteAddr.substring(7);
+        }
+        return remoteAddr;
+    }
+    
+    return 'unknown';
+}
+
 const loginAttempts = new Map();
 
 const useBcrypt = true;
@@ -219,7 +247,7 @@ function rateLimitMiddleware(options = {}) {
     const {
         windowMs = 60000,
         maxRequests = 100,
-        keyGenerator = (req) => req.ip,
+        keyGenerator = (req) => getClientIp(req),
     } = options;
 
     return (req, res, next) => {
@@ -273,4 +301,5 @@ module.exports = {
     passwordHashMiddleware,
     rateLimitMiddleware,
     SECURITY_CONFIG,
+    getClientIp,
 };

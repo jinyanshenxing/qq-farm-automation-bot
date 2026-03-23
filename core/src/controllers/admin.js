@@ -11,7 +11,7 @@ const express = require('express');
 const fetch = require('node-fetch');
 const { Server: SocketIOServer } = require('socket.io');
 const { version } = require('../../package.json');
-const { CONFIG } = require('../config/config');
+const { CONFIG, updateRuntimeConfig, getRuntimeConfig, getDefaultSystemConfig } = require('../config/config');
 const { getLevelExpProgress } = require('../config/gameConfig');
 const { getResourcePath } = require('../config/runtime-paths');
 const store = require('../models/store');
@@ -68,7 +68,36 @@ function startAdminServer(dataProvider) {
     provider = dataProvider;
 
     app = express();
+    app.set('trust proxy', true);
     app.use(express.json());
+
+    function getClientIp(req) {
+        const cfIp = req.headers['cf-connecting-ip'];
+        if (cfIp) return cfIp.trim();
+        
+        const xRealIp = req.headers['x-real-ip'];
+        if (xRealIp) return xRealIp.trim();
+        
+        const xForwardedFor = req.headers['x-forwarded-for'];
+        if (xForwardedFor) {
+            const ips = xForwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
+            if (ips.length > 0) return ips[0];
+        }
+        
+        if (req.ip && req.ip !== '::1' && req.ip !== '::ffff:127.0.0.1') {
+            return req.ip;
+        }
+        
+        const remoteAddr = req.connection?.remoteAddress || req.socket?.remoteAddress;
+        if (remoteAddr) {
+            if (remoteAddr.startsWith('::ffff:')) {
+                return remoteAddr.substring(7);
+            }
+            return remoteAddr;
+        }
+        
+        return 'unknown';
+    }
 
     const tokens = new Set();
 
@@ -110,9 +139,20 @@ function startAdminServer(dataProvider) {
     };
 
     app.use((req, res, next) => {
-        res.header('Access-Control-Allow-Origin', '*');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+        const allowedOrigins = CONFIG.ALLOWED_ORIGINS || ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'];
+        const origin = req.headers.origin;
+        
+        if (origin && allowedOrigins.includes(origin)) {
+            res.header('Access-Control-Allow-Origin', origin);
+        } else if (!origin) {
+            res.header('Access-Control-Allow-Origin', '*');
+        }
+        
+        res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS, PUT');
         res.header('Access-Control-Allow-Headers', 'Content-Type, x-account-id, x-admin-token, x-proxy-api-key, x-proxy-api-url, x-proxy-app-id');
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.header('Access-Control-Max-Age', '86400');
+        
         if (req.method === 'OPTIONS') return res.sendStatus(200);
         next();
     });
@@ -209,29 +249,65 @@ function startAdminServer(dataProvider) {
     // 登录与鉴权
     app.post('/api/login', (req, res) => {
         const { username, password } = req.body || {};
+        const clientIp = getClientIp(req);
+        const userAgent = req.headers['user-agent'] || 'unknown';
 
-        // 如果提供了用户名，使用用户系统登录
         if (username && password) {
-            const user = userStore.validateUser(username, password);
+            const user = userStore.validateUser(username, password, clientIp);
+            
+            if (user && user.error) {
+                const statusCode = user.error === 'rate_limit' ? 429 : 
+                                   user.error === 'locked' ? 423 : 401;
+                
+                adminLogger.warn('登录失败', { 
+                    username, 
+                    error: user.error, 
+                    ip: clientIp,
+                    message: user.message 
+                });
+
+                userStore.addLoginLog({
+                    event: 'login_failed',
+                    username,
+                    errorType: user.error,
+                    ip: clientIp,
+                    userAgent
+                });
+                
+                return res.status(statusCode).json({ 
+                    ok: false, 
+                    error: user.message,
+                    errorType: user.error,
+                    remainingMs: user.remainingMs 
+                });
+            }
+            
             if (!user) {
+                adminLogger.warn('登录失败', { username, ip: clientIp, reason: 'invalid_credentials' });
+                
+                userStore.addLoginLog({
+                    event: 'login_failed',
+                    username,
+                    errorType: 'invalid_credentials',
+                    ip: clientIp,
+                    userAgent
+                });
+                
                 return res.status(401).json({ ok: false, error: '用户名或密码错误' });
             }
 
-            console.log('[登录检查] 用户:', username, '角色:', user.role, '卡密信息:', user.card);
+            adminLogger.info('登录检查', { username, role: user.role, cardInfo: user.card ? 'exists' : 'none' });
 
-            // 管理员不检查封禁和过期
             if (user.role !== 'admin') {
-                // 检查用户是否被封禁
                 if (user.card && user.card.enabled === false) {
-                    console.log('[登录拒绝] 用户已被封禁:', username);
+                    adminLogger.warn('登录拒绝', { username, reason: 'banned' });
                     return res.status(403).json({ ok: false, error: '账号已被封禁，请联系管理员' });
                 }
 
-                // 检查是否过期（仅对非永久卡）
                 if (user.card && user.card.expiresAt) {
                     const now = Date.now();
                     if (user.card.expiresAt < now) {
-                        console.log('[登录拒绝] 用户已过期:', username);
+                        adminLogger.warn('登录拒绝', { username, reason: 'expired' });
                         return res.status(403).json({ ok: false, error: '账号已过期，请续费后重新登录' });
                     }
                 }
@@ -240,7 +316,17 @@ function startAdminServer(dataProvider) {
             const token = issueToken();
             tokens.add(token);
             tokenUserMap.set(token, user);
-            console.log('[登录成功]', username, '角色:', user.role);
+            
+            adminLogger.info('登录成功', { username, role: user.role, ip: clientIp });
+
+            userStore.addLoginLog({
+                event: 'login_success',
+                username,
+                errorType: null,
+                ip: clientIp,
+                userAgent
+            });
+            
             return res.json({ 
                 ok: true, 
                 data: { 
@@ -248,12 +334,12 @@ function startAdminServer(dataProvider) {
                     role: user.role, 
                     card: user.card, 
                     accountLimit: user.accountLimit || userStore.DEFAULT_ACCOUNT_LIMIT || 2,
-                    user: { username: user.username } 
+                    user: { username: user.username },
+                    mustChangePassword: user.mustChangePassword || false
                 } 
             });
         }
 
-        // 必须同时提供用户名和密码
         return res.status(401).json({ ok: false, error: '请输入用户名和密码' });
     });
 
@@ -268,6 +354,30 @@ function startAdminServer(dataProvider) {
             return res.status(400).json(result);
         }
         res.json({ ok: true, data: result.user });
+    });
+
+    // 获取登录日志（管理员）
+    app.get('/api/admin/login-logs', authRequired, (req, res) => {
+        if (!req.currentUser || req.currentUser.role !== 'admin') {
+            return res.status(403).json({ ok: false, error: '无权限访问' });
+        }
+        
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit) || 100, 1), 500);
+        const offset = Math.max(Number.parseInt(req.query.offset) || 0, 0);
+        
+        const result = userStore.getLoginLogs(limit, offset);
+        res.json({ ok: true, data: result });
+    });
+
+    // 清空登录日志（管理员）
+    app.delete('/api/admin/login-logs', authRequired, (req, res) => {
+        if (!req.currentUser || req.currentUser.role !== 'admin') {
+            return res.status(403).json({ ok: false, error: '无权限访问' });
+        }
+        
+        const result = userStore.clearLoginLogs();
+        adminLogger.info('登录日志已清空', { admin: req.currentUser.username });
+        res.json(result);
     });
 
     // 查询卡密信息接口（用于续费前预览）
@@ -403,11 +513,15 @@ function startAdminServer(dataProvider) {
 
     const getAccountList = (username = null) => {
         try {
+            // 检查是否启用用户隔离
+            const wxConfig = store.getGlobalWxConfig();
+            const userIsolation = wxConfig.userIsolation !== false;
+
             if (provider && typeof provider.getAccounts === 'function') {
                 const data = provider.getAccounts();
                 if (data && Array.isArray(data.accounts)) {
-                    // 如果指定了用户名，只返回该用户的账号
-                    if (username) {
+                    // 如果指定了用户名且启用了用户隔离，只返回该用户的账号
+                    if (username && userIsolation) {
                         return data.accounts.filter(a => a.username === username);
                     }
                     return data.accounts;
@@ -418,8 +532,11 @@ function startAdminServer(dataProvider) {
         }
         const data = store.getAccounts ? store.getAccounts() : { accounts: [] };
         let accounts = Array.isArray(data.accounts) ? data.accounts : [];
-        // 如果指定了用户名，只返回该用户的账号
-        if (username) {
+        // 检查是否启用用户隔离
+        const wxConfig = store.getGlobalWxConfig();
+        const userIsolation = wxConfig.userIsolation !== false;
+        // 如果指定了用户名且启用了用户隔离，只返回该用户的账号
+        if (username && userIsolation) {
             accounts = accounts.filter(a => a.username === username);
         }
         return accounts;
@@ -687,7 +804,7 @@ function startAdminServer(dataProvider) {
     });
 
     // API: 好友黑名单
-    app.get('/api/friend-blacklist', (req, res) => {
+    app.get('/api/friend-blacklist', async (req, res) => {
         const id = getAccId(req);
         if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
 
@@ -696,11 +813,44 @@ function startAdminServer(dataProvider) {
             return res.status(403).json({ ok: false, error: '无权访问此账号' });
         }
 
-        const list = store.getFriendBlacklist ? store.getFriendBlacklist(id) : [];
+        const gids = store.getFriendBlacklist ? store.getFriendBlacklist(id) : [];
+        
+        // 尝试获取好友列表以附加昵称和头像
+        let friendsList = [];
+        try {
+            if (provider && typeof provider.getFriends === 'function') {
+                friendsList = await provider.getFriends(id) || [];
+            }
+        } catch (e) {
+            // 忽略获取好友列表失败
+        }
+        
+        // 构建好友信息映射
+        const friendMap = new Map();
+        for (const f of friendsList) {
+            const gid = Number(f && f.gid);
+            if (gid > 0) {
+                friendMap.set(gid, {
+                    name: f.name || f.remark || '',
+                    avatarUrl: f.avatarUrl || f.avatar_url || '',
+                });
+            }
+        }
+        
+        // 构建带好友信息的黑名单
+        const list = gids.map(gid => {
+            const info = friendMap.get(Number(gid)) || {};
+            return {
+                gid: Number(gid),
+                name: info.name || '',
+                avatarUrl: info.avatarUrl || '',
+            };
+        });
+        
         res.json({ ok: true, data: list });
     });
 
-    app.post('/api/friend-blacklist/toggle', (req, res) => {
+    app.post('/api/friend-blacklist/toggle', async (req, res) => {
         const id = getAccId(req);
         if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
 
@@ -718,11 +868,45 @@ function startAdminServer(dataProvider) {
         } else {
             next = [...current, gid];
         }
-        const saved = store.setFriendBlacklist ? store.setFriendBlacklist(id, next) : next;
+        const savedGids = store.setFriendBlacklist ? store.setFriendBlacklist(id, next) : next;
+        
         // 同步配置到 worker 进程
         if (provider && typeof provider.broadcastConfig === 'function') {
             provider.broadcastConfig(id);
         }
+        
+        // 尝试获取好友列表以附加昵称和头像
+        let friendsList = [];
+        try {
+            if (provider && typeof provider.getFriends === 'function') {
+                friendsList = await provider.getFriends(id) || [];
+            }
+        } catch (e) {
+            // 忽略获取好友列表失败
+        }
+        
+        // 构建好友信息映射
+        const friendMap = new Map();
+        for (const f of friendsList) {
+            const fGid = Number(f && f.gid);
+            if (fGid > 0) {
+                friendMap.set(fGid, {
+                    name: f.name || f.remark || '',
+                    avatarUrl: f.avatarUrl || f.avatar_url || '',
+                });
+            }
+        }
+        
+        // 构建带好友信息的黑名单
+        const saved = savedGids.map(g => {
+            const info = friendMap.get(Number(g)) || {};
+            return {
+                gid: Number(g),
+                name: info.name || '',
+                avatarUrl: info.avatarUrl || '',
+            };
+        });
+        
         res.json({ ok: true, data: saved });
     });
 
@@ -1319,6 +1503,7 @@ function startAdminServer(dataProvider) {
             const stealDelaySeconds = (typeof store.getStealDelaySeconds === 'function') ? store.getStealDelaySeconds(id) : 0;
             const plantOrderRandom = (typeof store.getPlantOrderRandom === 'function') ? store.getPlantOrderRandom(id) : false;
             const plantDelaySeconds = (typeof store.getPlantDelaySeconds === 'function') ? store.getPlantDelaySeconds(id) : 0;
+            const fastHarvestAdvanceMs = (typeof store.getFastHarvestAdvanceMs === 'function') ? store.getFastHarvestAdvanceMs(id) : 200;
             const fertilizerBuyType = (typeof store.getFertilizerBuyType === 'function') ? store.getFertilizerBuyType(id) : 'organic';
             const fertilizerBuyCount = (typeof store.getFertilizerBuyCount === 'function') ? store.getFertilizerBuyCount(id) : 0;
             const bagSeedPriority = (typeof store.getBagSeedPriority === 'function') ? store.getBagSeedPriority(id) : [];
@@ -1328,7 +1513,7 @@ function startAdminServer(dataProvider) {
             const offlineReminder = store.getOfflineReminder && currentUser
                 ? store.getOfflineReminder(currentUser.username)
                 : { channel: 'webhook', reloginUrlMode: 'none', endpoint: '', token: '', title: '账号下线提醒', msg: '账号下线', offlineDeleteSec: 0 };
-            res.json({ ok: true, data: { intervals, strategy, preferredSeed, friendQuietHours, automation, stealDelaySeconds, plantOrderRandom, plantDelaySeconds, fertilizerBuyType, fertilizerBuyCount, bagSeedPriority, bagSeedFallbackStrategy, ui, offlineReminder } });
+            res.json({ ok: true, data: { intervals, strategy, preferredSeed, friendQuietHours, automation, stealDelaySeconds, plantOrderRandom, plantDelaySeconds, fastHarvestAdvanceMs, fertilizerBuyType, fertilizerBuyCount, bagSeedPriority, bagSeedFallbackStrategy, ui, offlineReminder } });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
         }
@@ -1393,6 +1578,77 @@ function startAdminServer(dataProvider) {
             const { content, showOnce } = req.body || {};
             const announcement = store.setAnnouncement(content, showOnce);
             res.json({ ok: true, data: announcement });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // ============ 系统配置 API（仅管理员） ============
+
+    // 获取系统配置
+    app.get('/api/admin/system-config', authRequired, adminRequired, (req, res) => {
+        try {
+            const savedConfig = store.getSystemConfig();
+            const defaultConfig = getDefaultSystemConfig();
+            const currentRuntime = getRuntimeConfig();
+            res.json({
+                ok: true,
+                data: {
+                    saved: savedConfig,
+                    default: defaultConfig,
+                    current: currentRuntime,
+                },
+            });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // 保存系统配置
+    app.post('/api/admin/system-config', authRequired, adminRequired, (req, res) => {
+        try {
+            const { serverUrl, clientVersion, platform, os } = req.body || {};
+            const newConfig = { serverUrl, clientVersion, platform, os };
+            const saved = store.setSystemConfig(newConfig);
+            updateRuntimeConfig(saved);
+            const current = getRuntimeConfig();
+            res.json({ ok: true, data: { saved, current } });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // 重置系统配置为默认值
+    app.post('/api/admin/system-config/reset', authRequired, adminRequired, (req, res) => {
+        try {
+            const defaultConfig = getDefaultSystemConfig();
+            store.setSystemConfig(defaultConfig);
+            updateRuntimeConfig(defaultConfig);
+            const current = getRuntimeConfig();
+            res.json({ ok: true, data: { saved: defaultConfig, current } });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // ============ 全局微信配置 API（仅管理员） ============
+
+    // 获取全局微信配置
+    app.get('/api/admin/wx-config', authRequired, adminRequired, (req, res) => {
+        try {
+            const config = store.getGlobalWxConfig();
+            res.json({ ok: true, data: config });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // 保存全局微信配置
+    app.post('/api/admin/wx-config', authRequired, adminRequired, (req, res) => {
+        try {
+            const config = req.body || {};
+            const saved = store.setGlobalWxConfig(config);
+            res.json({ ok: true, data: saved });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
         }
@@ -1550,7 +1806,15 @@ function startAdminServer(dataProvider) {
     app.delete('/api/admin/users/:username', authRequired, adminRequired, (req, res) => {
         try {
             const { username } = req.params;
-            const result = userStore.deleteUser(username);
+            const currentUser = req.currentUser;
+
+            // 不能删除自己
+            if (currentUser && currentUser.username === username) {
+                return res.status(400).json({ ok: false, error: '不能删除自己的账号' });
+            }
+
+            // 管理员可以删除其他管理员
+            const result = userStore.deleteUser(username, true);
             if (!result.ok) {
                 return res.status(400).json(result);
             }
@@ -1625,8 +1889,8 @@ function startAdminServer(dataProvider) {
         }
     });
 
-    // 保存用户微信登录配置
-    app.post('/api/user/wxlogin-config', authRequired, (req, res) => {
+    // 保存用户微信登录配置（仅管理员可以保存全局配置）
+    app.post('/api/user/wxlogin-config', authRequired, adminRequired, (req, res) => {
         try {
             const user = req.currentUser;
             if (!user) {
@@ -1634,19 +1898,14 @@ function startAdminServer(dataProvider) {
             }
 
             const config = req.body || {};
-            const result = userStore.saveWxLoginConfig(user.username, config);
-
-            if (!result.ok) {
-                return res.status(400).json(result);
-            }
-
-            res.json(result);
+            const saved = store.setGlobalWxConfig(config);
+            res.json({ ok: true, config: saved });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
         }
     });
 
-    // 获取用户微信登录配置
+    // 获取用户微信登录配置（普通用户获取全局配置）
     app.get('/api/user/wxlogin-config', authRequired, (req, res) => {
         try {
             const user = req.currentUser;
@@ -1654,13 +1913,9 @@ function startAdminServer(dataProvider) {
                 return res.status(401).json({ ok: false, error: '未登录' });
             }
 
-            const result = userStore.getWxLoginConfig(user.username);
-
-            if (!result.ok) {
-                return res.status(400).json(result);
-            }
-
-            res.json(result);
+            // 普通用户获取全局配置，管理员可以获取并修改全局配置
+            const globalConfig = store.getGlobalWxConfig();
+            res.json({ ok: true, config: globalConfig });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
         }

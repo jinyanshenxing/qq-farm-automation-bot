@@ -739,19 +739,6 @@ useIntervalFn(updateCountdowns, 1000)
                 {{ val }}
               </div>
             </div>
-            <div
-              class="col-span-2 flex items-center justify-between rounded bg-gradient-to-r from-orange-50 to-amber-50 px-3 py-2 dark:from-orange-900/20 dark:to-amber-900/20"
-            >
-              <div class="flex items-center gap-2">
-                <div class="text-base 2xl:text-lg i-carbon-run text-orange-500" />
-                <div class="text-xs text-gray-500 2xl:text-sm">
-                  累计偷菜
-                </div>
-              </div>
-              <div class="text-sm font-bold text-orange-600 2xl:text-base dark:text-orange-400">
-                {{ status?.totalSteal || 0 }}
-              </div>
-            </div>
           </div>
         </div>
       </div>

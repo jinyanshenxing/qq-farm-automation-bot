@@ -39,7 +39,8 @@ const sortOrderOptions = [
 
 const filteredList = computed(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
-  if (!keyword) return list.value
+  if (!keyword)
+    return list.value
   return list.value.filter((item: any) => {
     const name = String(item.name || '').toLowerCase()
     const seedId = String(item.seedId || '')

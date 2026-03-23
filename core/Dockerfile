@@ -8,6 +8,7 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY core/package.json ./core/
 COPY web/package.json ./web/
 
+RUN pnpm config set registry https://registry.npmmirror.com/
 RUN pnpm install --frozen-lockfile
 
 COPY core ./core

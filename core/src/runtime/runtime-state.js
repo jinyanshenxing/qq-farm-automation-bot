@@ -1,5 +1,6 @@
 const EventEmitter = require('node:events');
 const { createModuleLogger } = require('../services/logger');
+const { getTodayKey, loadPersistedStats } = require('../services/stats');
 
 function pad2(n) {
     return String(n).padStart(2, '0');
@@ -109,11 +110,33 @@ function createRuntimeState(options) {
     }
 
     function buildDefaultStatus(accountId) {
+        const id = String(accountId || '');
+        const operations = buildDefaultOperations();
+        let totalSteal = 0;
+
+        if (id) {
+            const saved = loadPersistedStats(id);
+            const todayKey = getTodayKey();
+            if (saved) {
+                if (saved.date === todayKey && saved.operations) {
+                    for (const k of operationKeys) {
+                        if (saved.operations[k] !== undefined) {
+                            operations[k] = Number(saved.operations[k]) || 0;
+                        }
+                    }
+                }
+                if (typeof saved.totalSteal === 'number') {
+                    totalSteal = saved.totalSteal;
+                }
+            }
+        }
+
         return {
             connection: { connected: false },
             status: { name: '', level: 0, gold: 0, exp: 0, platform: 'qq' },
             uptime: 0,
-            operations: buildDefaultOperations(),
+            operations,
+            totalSteal,
             sessionExpGained: 0,
             sessionGoldGained: 0,
             sessionCouponGained: 0,
@@ -125,7 +148,7 @@ function createRuntimeState(options) {
             preferredSeed: store.getPreferredSeed(accountId),
             expProgress: { current: 0, needed: 0, level: 0 },
             configRevision,
-            accountId: String(accountId || ''),
+            accountId: id,
         };
     }
 

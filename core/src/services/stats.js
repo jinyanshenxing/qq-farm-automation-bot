@@ -59,7 +59,7 @@ const operations = {
     levelUp: 0,
 };
 
-let totalSteal = 0;
+let currentDateKey = null;
 
 const lastState = {
     gold: -1,
@@ -85,13 +85,23 @@ let currentAccountId = null;
 let saveTimer = null;
 
 function recordOperation(type, count = 1) {
+    checkAndResetDailyStats();
     if (operations[type] !== undefined) {
         operations[type] += count;
-        if (type === 'steal') {
-            totalSteal += count;
-        }
         scheduleSave();
     }
+}
+
+function checkAndResetDailyStats() {
+    if (!currentAccountId) return;
+    const todayKey = getTodayKey();
+    if (currentDateKey && currentDateKey !== todayKey) {
+        console.warn(`[统计] 检测到跨天，重置每日统计 (${currentDateKey} -> ${todayKey})`);
+        Object.keys(operations).forEach((key) => {
+            operations[key] = 0;
+        });
+    }
+    currentDateKey = todayKey;
 }
 
 function scheduleSave() {
@@ -110,7 +120,6 @@ function doSave() {
         date: todayKey,
         operations: { ...operations },
         initialState: { ...initialState },
-        totalSteal,
         savedAt: Date.now(),
     };
     savePersistedStats(currentAccountId, data);
@@ -131,6 +140,7 @@ function initStats(gold, exp, coupon = 0) {
 function initStatsWithPersistence(accountId, gold, exp, coupon = 0) {
     currentAccountId = accountId;
     const todayKey = getTodayKey();
+    currentDateKey = todayKey;
     const saved = loadPersistedStats(accountId);
 
     if (saved && saved.date === todayKey) {
@@ -147,12 +157,6 @@ function initStatsWithPersistence(accountId, gold, exp, coupon = 0) {
         if (saved) {
             console.warn(`[统计] 日期已变更，重置统计 (${saved.date} -> ${todayKey})`);
         }
-    }
-
-    if (saved && typeof saved.totalSteal === 'number') {
-        totalSteal = saved.totalSteal;
-    } else {
-        totalSteal = 0;
     }
 
     initStats(gold, exp, coupon);
@@ -215,6 +219,7 @@ function recomputeSessionTotals(currentGold, currentExp, currentCoupon) {
 }
 
 function getStats(statusData, userState, connected, limits) {
+    checkAndResetDailyStats();
     const statusObj = (statusData && typeof statusData === 'object') ? statusData : {};
     const userObj = (userState && typeof userState === 'object') ? userState : {};
 
@@ -246,7 +251,6 @@ function getStats(statusData, userState, connected, limits) {
         },
         uptime: process.uptime(),
         operations: operationsSnapshot,
-        totalSteal,
         sessionExpGained: session.expGained,
         sessionGoldGained: session.goldGained,
         sessionCouponGained: session.couponGained,
@@ -270,4 +274,7 @@ module.exports = {
     resetSessionGains,
     getStats,
     saveStats,
+    getTodayKey,
+    loadPersistedStats,
+    checkAndResetDailyStats,
 };

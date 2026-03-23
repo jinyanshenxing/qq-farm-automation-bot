@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch } from 'vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import { useUserStore } from '@/stores/user'
 
-const router = useRouter()
 const userStore = useUserStore()
 
 const isLogin = ref(true)
@@ -15,8 +13,101 @@ const cardCode = ref('')
 const error = ref('')
 const success = ref('')
 const loading = ref(false)
+const showPasswordStrength = ref(false)
+const lockoutRemaining = ref(0)
+const rateLimitRemaining = ref(0)
+
+const passwordStrength = computed(() => {
+  const pwd = password.value
+  if (!pwd) return { score: 0, level: '', suggestions: [], valid: false }
+  
+  let score = 0
+  const suggestions: string[] = []
+  
+  if (pwd.length >= 6) score++
+  else suggestions.push('至少6位')
+  
+  if (pwd.length >= 10) score++
+  
+  let typeCount = 0
+  if (/[a-z]/.test(pwd)) typeCount++
+  if (/[A-Z]/.test(pwd)) typeCount++
+  if (/[0-9]/.test(pwd)) typeCount++
+  if (/[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\;'/`~]/.test(pwd)) typeCount++
+  
+  if (typeCount >= 2) score += 2
+  else suggestions.push('需包含大写、小写、数字、特殊符号中的至少两种')
+  
+  if (typeCount >= 3) score++
+  if (typeCount >= 4) score++
+  
+  const commonPasswords = ['password', '123456', 'qwerty', 'abc123', '111111']
+  if (commonPasswords.some(p => pwd.toLowerCase().includes(p))) {
+    score = Math.max(0, score - 2)
+    suggestions.push('避免常见密码')
+  }
+  
+  const level = score <= 2 ? '弱' : score <= 4 ? '中' : score <= 6 ? '强' : '非常强'
+  const color = score <= 2 ? '#ef5350' : score <= 4 ? '#ffa726' : score <= 6 ? '#66bb6a' : '#43a047'
+  const valid = pwd.length >= 6 && typeCount >= 2
+  
+  return { score, level, suggestions, color, valid, typeCount }
+})
+
+const usernameValid = computed(() => {
+  const name = username.value
+  if (!name) return { valid: false, message: '' }
+  if (name.length < 3) return { valid: false, message: '用户名至少3位' }
+  if (name.length > 32) return { valid: false, message: '用户名最多32位' }
+  if (!/^[a-zA-Z0-9_]+$/.test(name)) return { valid: false, message: '只能包含字母、数字、下划线' }
+  return { valid: true, message: '' }
+})
+
+watch(password, () => {
+  if (!isLogin.value && password.value) {
+    showPasswordStrength.value = true
+  }
+})
+
+function validateForm(): boolean {
+  if (!username.value) {
+    error.value = '请输入用户名'
+    return false
+  }
+  
+  if (!usernameValid.value.valid) {
+    error.value = usernameValid.value.message
+    return false
+  }
+  
+  if (!password.value) {
+    error.value = '请输入密码'
+    return false
+  }
+  
+  if (!isLogin.value) {
+    if (password.value.length < 6) {
+      error.value = '密码长度至少6位'
+      return false
+    }
+    
+    if (!passwordStrength.value.valid) {
+      error.value = '密码强度不足：' + passwordStrength.value.suggestions.join('、')
+      return false
+    }
+    
+    if (!cardCode.value) {
+      error.value = '请输入卡密'
+      return false
+    }
+  }
+  
+  return true
+}
 
 async function handleSubmit() {
+  if (!validateForm()) return
+  
   loading.value = true
   error.value = ''
   success.value = ''
@@ -25,23 +116,36 @@ async function handleSubmit() {
     if (isLogin.value) {
       const result = await userStore.login(username.value, password.value)
       if (result.ok) {
-        router.push('/')
+        if (result.data?.mustChangePassword) {
+          success.value = '登录成功！请修改默认密码以确保账户安全'
+        }
+        setTimeout(() => {
+          window.location.href = '/'
+        }, 500)
       }
       else {
-        error.value = result.error || '登录失败'
+        if (result.errorType === 'rate_limit') {
+          error.value = result.error || '请求过于频繁，请稍后重试'
+          if (result.remainingMs) {
+            rateLimitRemaining.value = Math.ceil(result.remainingMs / 1000)
+          }
+        } else if (result.errorType === 'locked') {
+          error.value = result.error || '账户已被锁定'
+          if (result.remainingMs) {
+            lockoutRemaining.value = Math.ceil(result.remainingMs / 1000 / 60)
+          }
+        } else {
+          error.value = result.error || '登录失败'
+        }
       }
     }
     else {
-      if (!cardCode.value) {
-        error.value = '请输入卡密'
-        loading.value = false
-        return
-      }
       const result = await userStore.register(username.value, password.value, cardCode.value)
       if (result.ok) {
         success.value = '注册成功，请登录'
         isLogin.value = true
         cardCode.value = ''
+        password.value = ''
       }
       else {
         error.value = result.error || '注册失败'
@@ -49,7 +153,20 @@ async function handleSubmit() {
     }
   }
   catch (e: any) {
-    error.value = e.response?.data?.error || e.message || '操作异常'
+    const data = e.response?.data
+    if (data?.errorType === 'rate_limit') {
+      error.value = data.error || '请求过于频繁'
+      if (data.remainingMs) {
+        rateLimitRemaining.value = Math.ceil(data.remainingMs / 1000)
+      }
+    } else if (data?.errorType === 'locked') {
+      error.value = data.error || '账户已被锁定'
+      if (data.remainingMs) {
+        lockoutRemaining.value = Math.ceil(data.remainingMs / 1000 / 60)
+      }
+    } else {
+      error.value = data?.error || e.message || '操作异常'
+    }
   }
   finally {
     loading.value = false
@@ -60,6 +177,9 @@ function toggleMode() {
   isLogin.value = !isLogin.value
   error.value = ''
   success.value = ''
+  showPasswordStrength.value = false
+  lockoutRemaining.value = 0
+  rateLimitRemaining.value = 0
 }
 </script>
 
@@ -122,9 +242,12 @@ function toggleMode() {
             id="username"
             v-model="username"
             type="text"
-            placeholder="请输入用户名"
+            placeholder="请输入用户名（3-32位字母数字下划线）"
             required
           />
+          <p v-if="username && !usernameValid.valid" class="form-hint error">
+            {{ usernameValid.message }}
+          </p>
         </div>
 
         <div class="form-group">
@@ -139,6 +262,20 @@ function toggleMode() {
             placeholder="请输入密码"
             required
           />
+          <div v-if="showPasswordStrength && password" class="password-strength">
+            <div class="strength-bar">
+              <div 
+                class="strength-fill" 
+                :style="{ width: Math.min(passwordStrength.score * 12.5, 100) + '%', backgroundColor: passwordStrength.color }"
+              />
+            </div>
+            <span class="strength-text" :style="{ color: passwordStrength.color }">
+              {{ passwordStrength.level }}
+            </span>
+          </div>
+          <p v-if="!isLogin && passwordStrength.suggestions.length > 0" class="form-hint">
+            💡 建议：{{ passwordStrength.suggestions.join('、') }}
+          </p>
         </div>
 
         <div v-if="!isLogin" class="form-group">
@@ -160,7 +297,15 @@ function toggleMode() {
 
         <div v-if="error" class="message error-message">
           <span class="message-icon">⚠️</span>
-          {{ error }}
+          <div class="message-content">
+            {{ error }}
+            <span v-if="lockoutRemaining > 0" class="lockout-timer">
+              ({{ lockoutRemaining }} 分钟后解锁)
+            </span>
+            <span v-if="rateLimitRemaining > 0" class="lockout-timer">
+              ({{ rateLimitRemaining }} 秒后可重试)
+            </span>
+          </div>
         </div>
 
         <div v-if="success" class="message success-message">
@@ -193,6 +338,18 @@ function toggleMode() {
       <!-- 底部装饰 -->
       <div class="card-footer">
         <span>🌻 愿你的农场丰收满满 🌻</span>
+        <div class="footer-info">
+          <span class="version">v2.1.7</span>
+          <span class="separator">|</span>
+          <a
+            href="https://github.com/XyhTender/qq-farm-automation-bot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="github-link"
+          >
+            GitHub
+          </a>
+        </div>
       </div>
     </div>
   </div>
@@ -500,6 +657,69 @@ function toggleMode() {
   margin-top: 4px;
 }
 
+.form-hint.error {
+  color: #ef5350;
+}
+
+.password-strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.strength-bar {
+  flex: 1;
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.strength-fill {
+  height: 100%;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.strength-text {
+  font-size: 0.75rem;
+  font-weight: 500;
+  min-width: 50px;
+}
+
+.lockout-timer {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+.security-tips {
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+  border: 1px solid #ffe082;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-top: 8px;
+}
+
+.tip-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #f57c00;
+  margin-bottom: 6px;
+}
+
+.tip-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 0.75rem;
+  color: #ef6c00;
+}
+
+.tip-list li {
+  margin: 2px 0;
+}
+
 /* 消息提示 */
 .message {
   display: flex;
@@ -578,6 +798,31 @@ function toggleMode() {
   border-top: 1px solid rgba(102, 187, 106, 0.2);
   color: #81c784;
   font-size: 0.8rem;
+}
+
+.footer-info {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: #a5d6a7;
+}
+
+.separator {
+  color: #81c784;
+}
+
+.github-link {
+  color: #66bb6a;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.github-link:hover {
+  color: #43a047;
+  text-decoration: underline;
 }
 
 /* 暗色模式适配 */

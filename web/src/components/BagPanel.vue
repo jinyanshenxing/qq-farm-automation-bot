@@ -2,11 +2,11 @@
 import { useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 import { useAccountStore } from '@/stores/account'
 import { useBagStore } from '@/stores/bag'
 import { useStatusStore } from '@/stores/status'
 import { useToastStore } from '@/stores/toast'
-import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const accountStore = useAccountStore()
 const bagStore = useBagStore()
@@ -33,14 +33,18 @@ const selectedCategory = ref<CategoryValue>('fruit')
 
 function getItemCategory(item: any): CategoryValue {
   const itemType = Number(item?.itemType || 0)
-  if (itemType === 17 || itemType === 6) return 'fruit'
-  if (itemType === 5) return 'seed'
-  if (itemType === 11) return 'tool'
+  if (itemType === 17 || itemType === 6)
+    return 'fruit'
+  if (itemType === 5)
+    return 'seed'
+  if (itemType === 11)
+    return 'tool'
   return 'other'
 }
 
 const filteredItems = computed(() => {
-  if (selectedCategory.value === 'all') return items.value
+  if (selectedCategory.value === 'all')
+    return items.value
   return items.value.filter((item: any) => getItemCategory(item) === selectedCategory.value)
 })
 
@@ -83,7 +87,7 @@ function getPriceClass(item: any) {
 
 function canSell(item: any) {
   const itemType = Number(item?.itemType || 0)
-  return itemType === 17 || itemType === 5 || itemType === 6
+  return itemType === 17 || itemType === 6
 }
 
 function canBatchSell(item: any) {
@@ -100,7 +104,8 @@ function handleSellClick(item: any) {
     const isSelected = selectedForBatch.value.has(Number(item.id))
     if (isSelected) {
       selectedForBatch.value.delete(Number(item.id))
-    } else {
+    }
+    else {
       selectedForBatch.value.add(Number(item.id))
     }
     return
@@ -141,7 +146,8 @@ function handleUseClick(item: any) {
 
 async function handleConfirm() {
   const { action, item, selectedItems } = confirmModal.value
-  if (!currentAccountId.value) return
+  if (!currentAccountId.value)
+    return
 
   confirmModal.value.loading = true
   try {
@@ -149,7 +155,7 @@ async function handleConfirm() {
       const sellItems = originalItems.value
         .filter((it: any) => Number(it.id) === Number(item.id))
         .map((it: any) => ({ id: it.id, count: it.count, uid: it.uid || 0 }))
-      
+
       if (sellItems.length === 0) {
         toastStore.error('未找到可出售的物品')
         return
@@ -159,14 +165,16 @@ async function handleConfirm() {
       if (res.ok) {
         toastStore.success(`已出售 ${item.name || `物品${item.id}`}`)
         await loadBag()
-      } else {
+      }
+      else {
         toastStore.error(`出售失败: ${res.error || '未知错误'}`)
       }
-    } else if (action === 'batchSell' && selectedItems) {
+    }
+    else if (action === 'batchSell' && selectedItems) {
       const itemsToSell = originalItems.value
         .filter((it: any) => selectedItems.some((si: any) => Number(si.id) === Number(it.id)))
         .map((it: any) => ({ id: it.id, count: it.count, uid: it.uid || 0 }))
-      
+
       if (itemsToSell.length === 0) {
         toastStore.error('未找到可出售的物品')
         return
@@ -184,7 +192,8 @@ async function handleConfirm() {
             const priceId = Number(fi.priceId) || 0
             if (priceId === 1005) {
               totalGoldBean += price * count
-            } else {
+            }
+            else {
               totalGold += price * count
             }
           }
@@ -194,21 +203,26 @@ async function handleConfirm() {
         selectedForBatch.value.clear()
         batchMode.value = false
         await loadBag()
-      } else {
+      }
+      else {
         toastStore.error(`批量出售失败: ${res.error || '未知错误'}`)
       }
-    } else if (action === 'use' && item) {
+    }
+    else if (action === 'use' && item) {
       const res = await bagStore.useItem(currentAccountId.value, Number(item.id), Number(item.count || 1))
       if (res.ok) {
         toastStore.success(`已使用 ${item.name || `物品${item.id}`}`)
         await loadBag()
-      } else {
+      }
+      else {
         toastStore.error(`使用失败: ${res.error || '未知错误'}`)
       }
     }
-  } catch (e: any) {
+  }
+  catch (e: any) {
     toastStore.error(`操作失败: ${e.message || '未知错误'}`)
-  } finally {
+  }
+  finally {
     confirmModal.value.loading = false
     confirmModal.value.show = false
   }
@@ -246,7 +260,7 @@ function handleBatchSellClick() {
     toastStore.warning('请先选择要出售的物品')
     return
   }
-  
+
   const itemsToSell = originalItems.value
     .filter((it: any) => selectedList.includes(Number(it.id)))
     .map((it: any) => ({ id: it.id, count: it.count, uid: it.uid || 0 }))
@@ -261,12 +275,13 @@ function handleBatchSellClick() {
       const priceId = Number(item.priceId) || 0
       if (priceId === 1005) {
         totalGoldBean += price * count
-      } else {
+      }
+      else {
         totalGold += price * count
       }
     }
   }
-  
+
   const messages = [
     `确定要批量出售选中的 ${selectedList.length} 种物品吗?`,
   ]
@@ -276,7 +291,7 @@ function handleBatchSellClick() {
   if (totalGoldBean > 0) {
     messages.push(`金豆豆：${totalGoldBean}`)
   }
-  
+
   confirmModal.value = {
     show: true,
     title: '批量出售',
@@ -337,7 +352,7 @@ useIntervalFn(loadBag, 60000)
       请选择账号后查看背包
     </div>
 
-    <div v-else-if="statusError" class="rounded-lg border border-red-200 bg-red-50 p-8 text-center text-red-500 shadow dark:border-red-800 dark:bg-red-900/20">
+    <div v-else-if="statusError" class="border border-red-200 rounded-lg bg-red-50 p-8 text-center text-red-500 shadow dark:border-red-800 dark:bg-red-900/20">
       <div class="mb-2 text-lg font-bold">
         获取数据失败
       </div>
@@ -349,7 +364,7 @@ useIntervalFn(loadBag, 60000)
     <div v-else-if="!status?.connection?.connected" class="flex flex-col items-center justify-center gap-4 rounded-lg bg-white p-12 text-center text-gray-500 shadow dark:bg-gray-800">
       <div class="i-carbon-connection-signal-off text-4xl text-gray-400" />
       <div>
-        <div class="text-lg font-medium text-gray-700 dark:text-gray-300">
+        <div class="text-lg text-gray-700 font-medium dark:text-gray-300">
           账号未登录
         </div>
         <div class="mt-1 text-sm text-gray-400">
@@ -368,22 +383,22 @@ useIntervalFn(loadBag, 60000)
           v-for="cat in CATEGORY_OPTIONS"
           :key="cat.value"
           class="rounded-lg px-3 py-1.5 text-sm font-medium transition"
-          :class="selectedCategory === cat.value 
-            ? 'bg-blue-500 text-white dark:bg-blue-600' 
+          :class="selectedCategory === cat.value
+            ? 'bg-blue-500 text-white dark:bg-blue-600'
             : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'"
           @click="selectedCategory = cat.value"
         >
           {{ cat.label }}
           <span class="ml-1 text-xs opacity-70">({{ categoryCounts[cat.value] || 0 }})</span>
         </button>
-        
+
         <div class="flex-1" />
-        
-        <template v-if="selectedCategory === 'fruit' || selectedCategory === 'seed' || selectedCategory === 'all'">
+
+        <template v-if="selectedCategory === 'fruit' || selectedCategory === 'all'">
           <button
             class="rounded-lg px-3 py-1.5 text-sm font-medium transition"
-            :class="batchMode 
-              ? 'bg-orange-500 text-white dark:bg-orange-600' 
+            :class="batchMode
+              ? 'bg-orange-500 text-white dark:bg-orange-600'
               : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'"
             @click="toggleBatchMode"
           >
@@ -392,15 +407,15 @@ useIntervalFn(loadBag, 60000)
           </button>
           <template v-if="batchMode">
             <button
-              class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700"
+              class="rounded-lg bg-blue-500 px-3 py-1.5 text-sm text-white font-medium transition dark:bg-blue-600 hover:bg-blue-600 dark:hover:bg-blue-700"
               @click="selectAllSellable"
             >
               全选
             </button>
             <button
               class="rounded-lg px-3 py-1.5 text-sm font-medium transition"
-              :class="selectedSellableCount > 0 
-                ? 'bg-red-500 text-white hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700' 
+              :class="selectedSellableCount > 0
+                ? 'bg-red-500 text-white hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700'
                 : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'"
               :disabled="selectedSellableCount === 0"
               @click="handleBatchSellClick"
@@ -415,14 +430,14 @@ useIntervalFn(loadBag, 60000)
         <div
           v-for="item in filteredItems"
           :key="item.id"
-          class="group relative flex flex-col items-center rounded-lg border bg-white p-3 transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+          class="group relative flex flex-col items-center border rounded-lg bg-white p-3 transition dark:border-gray-700 dark:bg-gray-800 hover:shadow-md"
           :class="{
             'ring-2 ring-orange-500 dark:ring-orange-400': batchMode && selectedForBatch.has(Number(item.id)),
-            'opacity-50': batchMode && canBatchSell(item) && !selectedForBatch.has(Number(item.id))
+            'opacity-50': batchMode && canBatchSell(item) && !selectedForBatch.has(Number(item.id)),
           }"
           @click="batchMode && canBatchSell(item) && handleSellClick(item)"
         >
-          <div class="absolute left-2 top-2 font-mono text-xs text-gray-400">
+          <div class="absolute left-2 top-2 text-xs text-gray-400 font-mono">
             #{{ item.id }}
           </div>
 
@@ -430,7 +445,7 @@ useIntervalFn(loadBag, 60000)
             <template v-if="!batchMode">
               <button
                 v-if="canSell(item)"
-                class="rounded bg-red-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition hover:opacity-100 dark:bg-red-600"
+                class="rounded bg-red-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition dark:bg-red-600 hover:opacity-100"
                 title="出售全部"
                 @click.stop="handleSellClick(item)"
               >
@@ -438,7 +453,7 @@ useIntervalFn(loadBag, 60000)
               </button>
               <button
                 v-if="canUse(item)"
-                class="rounded bg-green-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition hover:opacity-100 dark:bg-green-600"
+                class="rounded bg-green-500 px-1.5 py-0.5 text-[10px] text-white opacity-70 transition dark:bg-green-600 hover:opacity-100"
                 title="使用全部"
                 @click.stop="handleUseClick(item)"
               >
@@ -447,7 +462,7 @@ useIntervalFn(loadBag, 60000)
             </template>
             <div
               v-else-if="canBatchSell(item)"
-              class="flex h-5 w-5 items-center justify-center rounded border-2 transition"
+              class="h-5 w-5 flex items-center justify-center border-2 rounded transition"
               :class="selectedForBatch.has(Number(item.id))
                 ? 'border-orange-500 bg-orange-500 text-white'
                 : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700'"
@@ -457,18 +472,18 @@ useIntervalFn(loadBag, 60000)
           </div>
 
           <div
-            class="thumb-wrap mb-2 mt-6 flex h-16 w-16 items-center justify-center rounded-full bg-gray-50 dark:bg-gray-700/50"
+            class="thumb-wrap mb-2 mt-6 h-16 w-16 flex items-center justify-center rounded-full bg-gray-50 dark:bg-gray-700/50"
             :data-fallback="(item.name || '物').slice(0, 1)"
           >
             <img
-                v-if="item.image && !imageErrors[item.id]"
-                :src="item.image"
-                :alt="item.name"
-                class="max-h-full max-w-full object-contain"
-                loading="lazy"
-                @error="imageErrors[item.id] = true"
+              v-if="item.image && !imageErrors[item.id]"
+              :src="item.image"
+              :alt="item.name"
+              class="max-h-full max-w-full object-contain"
+              loading="lazy"
+              @error="imageErrors[item.id] = true"
             >
-            <div v-else class="text-2xl font-bold text-gray-400 uppercase">
+            <div v-else class="text-2xl text-gray-400 font-bold uppercase">
               {{ (item.name || '物').slice(0, 1) }}
             </div>
           </div>

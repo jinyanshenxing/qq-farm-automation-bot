@@ -15,7 +15,6 @@ const emit = defineEmits(['close', 'saved'])
 const wxLoginStore = useWxLoginStore()
 const accountStore = useAccountStore()
 
-const activeTab = ref<'login' | 'settings'>('login')
 const accountName = ref('')
 
 // 轮询检查登录状态
@@ -42,16 +41,22 @@ async function handleAutoAddAccount(wxid: string, nickname?: string) {
     if (result.success && result.code) {
       const name = accountName.value.trim() || nickname || `微信账号${Date.now()}`
 
-      await accountStore.addAccount({
-        name,
-        code: result.code,
-        platform: 'wx',
-        loginType: 'wx_qr',
-        wxid,
-      })
-
-      emit('saved')
-      close()
+      // 检查是否启用自动添加账号
+      if (wxLoginStore.config.autoAddAccount) {
+        await accountStore.addAccount({
+          name,
+          code: result.code,
+          platform: 'wx',
+          loginType: 'wx_qr',
+          wxid,
+        })
+        emit('saved')
+        close()
+      }
+      else {
+        // 不自动添加，只返回登录信息，让用户手动复制 code
+        console.log('登录成功！Code:', result.code)
+      }
     }
   }
   catch (e) {
@@ -66,16 +71,6 @@ async function loadQRCode() {
   if (success) {
     startCheck()
   }
-}
-
-// 保存配置
-function saveConfig() {
-  wxLoginStore.updateConfig({
-    apiBase: wxLoginStore.config.apiBase,
-    apiKey: wxLoginStore.config.apiKey,
-    proxyApiUrl: wxLoginStore.config.proxyApiUrl,
-  })
-  activeTab.value = 'login'
 }
 
 // 关闭弹窗
@@ -114,7 +109,6 @@ const statusClass = computed(() => {
 
 watch(() => props.show, (newVal) => {
   if (newVal) {
-    activeTab.value = 'login'
     loadQRCode()
   }
   else {
@@ -136,34 +130,8 @@ watch(() => props.show, (newVal) => {
         </BaseButton>
       </div>
 
-      <!-- Tabs -->
-      <div class="flex border-b" :style="{ borderColor: 'color-mix(in srgb, var(--theme-text) 10%, transparent)' }">
-        <button
-          class="flex-1 py-2 text-center text-sm font-medium transition-colors"
-          :class="activeTab === 'login' ? 'border-b-2' : 'opacity-60 hover:opacity-80'"
-          :style="{
-            color: 'var(--theme-text)',
-            borderColor: activeTab === 'login' ? 'var(--theme-primary)' : 'transparent',
-          }"
-          @click="activeTab = 'login'"
-        >
-          扫码登录
-        </button>
-        <button
-          class="flex-1 py-2 text-center text-sm font-medium transition-colors"
-          :class="activeTab === 'settings' ? 'border-b-2' : 'opacity-60 hover:opacity-80'"
-          :style="{
-            color: 'var(--theme-text)',
-            borderColor: activeTab === 'settings' ? 'var(--theme-primary)' : 'transparent',
-          }"
-          @click="activeTab = 'settings'"
-        >
-          设置
-        </button>
-      </div>
-
-      <!-- Login Tab -->
-      <div v-if="activeTab === 'login'" class="p-4 space-y-4">
+      <!-- Login Content -->
+      <div class="p-4 space-y-4">
         <!-- 账号名称输入 -->
         <BaseInput
           v-model="accountName"
@@ -215,33 +183,6 @@ watch(() => props.show, (newVal) => {
         <!-- 说明文字 -->
         <div class="text-center text-xs opacity-60" :style="{ color: 'var(--theme-text)' }">
           使用微信扫描二维码登录，登录成功后将自动添加账号
-        </div>
-      </div>
-
-      <!-- Settings Tab -->
-      <div v-else class="p-4 space-y-4">
-        <div class="space-y-4">
-          <BaseInput
-            v-model="wxLoginStore.config.apiBase"
-            label="API地址"
-            placeholder="http://127.0.0.1:8059/api"
-          />
-          <BaseInput
-            v-model="wxLoginStore.config.apiKey"
-            label="API Key（可选）"
-            placeholder="留空使用本地登录，填写则使用代理登录"
-          />
-          <BaseInput
-            v-model="wxLoginStore.config.proxyApiUrl"
-            label="代理API地址"
-            placeholder="https://api.aineishe.com/api/wxnc"
-          />
-        </div>
-
-        <div class="flex justify-end pt-4">
-          <BaseButton variant="primary" @click="saveConfig">
-            保存设置
-          </BaseButton>
         </div>
       </div>
     </div>

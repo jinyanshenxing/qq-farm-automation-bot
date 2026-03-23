@@ -367,7 +367,8 @@ async function saveAnnouncement() {
 }
 
 async function fetchAnnouncement() {
-  if (userStore.isAdmin) return
+  if (userStore.isAdmin)
+    return
   try {
     const res = await api.get('/api/announcement')
     if (res.data?.ok && res.data?.data) {
@@ -394,8 +395,9 @@ async function markAnnouncementRead() {
 
 async function copyToken() {
   const tokenValue = userStore.token
-  if (!tokenValue) return
-  
+  if (!tokenValue)
+    return
+
   try {
     await navigator.clipboard.writeText(tokenValue)
     tokenCopied.value = true
@@ -633,7 +635,7 @@ async function copyToken() {
               <span>添加账号</span>
             </button>
             <router-link
-              to="/accounts"
+              to="/settings"
               class="w-full flex items-center gap-2 px-4 py-2 text-sm transition-colors hover:bg-gray-100/50 dark:hover:bg-gray-700/50"
               :style="{ color: 'var(--theme-primary)' }"
               @click="showAccountDropdown = false"
@@ -667,7 +669,6 @@ async function copyToken() {
       </router-link>
     </nav>
 
-
     <!-- Token Display (All Users) -->
     <div v-if="userStore.token" class="border-t border-gray-200/50 px-3 py-2 dark:border-gray-700/50">
       <button
@@ -687,7 +688,7 @@ async function copyToken() {
         v-show="showTokenDropdown"
         class="px-1 pt-2 transition-all"
       >
-        <div class="flex items-center justify-between mb-1">
+        <div class="mb-1 flex items-center justify-between">
           <button
             class="flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
             :class="tokenVisible ? 'text-blue-500' : 'text-gray-500 dark:text-gray-400'"
@@ -706,7 +707,7 @@ async function copyToken() {
             <span>{{ tokenCopied ? '已复制' : '复制' }}</span>
           </button>
         </div>
-        <div class="rounded bg-gray-100/50 px-2 py-1.5 font-mono text-[10px] text-gray-600 break-all dark:bg-gray-700/50 dark:text-gray-400">
+        <div class="break-all rounded bg-gray-100/50 px-2 py-1.5 text-[10px] text-gray-600 font-mono dark:bg-gray-700/50 dark:text-gray-400">
           {{ tokenVisible ? userStore.token : '••••••••••••••••' }}
         </div>
       </div>
@@ -752,11 +753,11 @@ async function copyToken() {
           <span v-if="serverVersion">Core v{{ serverVersion }}</span>
         </div>
       </div>
-      
+
       <!-- 主题选择弹出面板 -->
       <div
         v-show="showThemeDropdown"
-        class="absolute bottom-full left-0 right-0 z-50 mb-14 grid grid-cols-4 gap-1.5 rounded-lg bg-white p-2 shadow-lg dark:bg-gray-800"
+        class="absolute bottom-full left-0 right-0 z-50 grid grid-cols-4 mb-14 gap-1.5 rounded-lg bg-white p-2 shadow-lg dark:bg-gray-800"
       >
         <button
           v-for="(t, theme) in appStore.themes"
@@ -971,7 +972,7 @@ async function copyToken() {
             id="announcementShowOnce"
             v-model="announcementShowOnce"
             type="checkbox"
-            class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            class="h-4 w-4 border-gray-300 rounded text-blue-600 focus:ring-blue-500"
           >
           <label for="announcementShowOnce" class="text-sm text-gray-600 dark:text-gray-400">
             只显示一次（公告变动时再显示）
@@ -1004,26 +1005,31 @@ async function copyToken() {
     v-if="showAnnouncementViewModal && currentAnnouncement?.content"
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
   >
-    <div class="w-[500px] rounded-xl bg-white p-5 shadow-2xl dark:bg-gray-800">
-      <div class="mb-4 flex items-center gap-2">
-        <div class="i-carbon-notification text-xl" :style="{ color: 'var(--theme-primary)' }" />
-        <h3 class="text-lg text-gray-900 font-bold dark:text-gray-100">
-          系统公告
-        </h3>
-      </div>
+    <div
+      class="announcement-view-modal rounded-xl bg-white shadow-2xl dark:bg-gray-800"
+      @click.stop
+    >
+      <div class="p-5">
+        <div class="mb-4 flex items-center gap-2">
+          <div class="i-carbon-notification text-xl" :style="{ color: 'var(--theme-primary)' }" />
+          <h3 class="text-lg text-gray-900 font-bold dark:text-gray-100">
+            系统公告
+          </h3>
+        </div>
 
-      <div class="mb-4 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-gray-700/50 dark:text-gray-300">
-        {{ currentAnnouncement.content }}
-      </div>
+        <div class="announcement-content mb-4 overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-4 text-sm text-gray-700 dark:bg-gray-700/50 dark:text-gray-300">
+          {{ currentAnnouncement.content }}
+        </div>
 
-      <div class="flex justify-end">
-        <button
-          class="rounded-lg px-4 py-1.5 text-sm text-white font-medium shadow transition hover:opacity-90"
-          :style="{ backgroundColor: 'var(--theme-primary)' }"
-          @click="markAnnouncementRead"
-        >
-          我知道了
-        </button>
+        <div class="flex justify-end">
+          <button
+            class="rounded-lg px-4 py-1.5 text-sm text-white font-medium shadow transition hover:opacity-90"
+            :style="{ backgroundColor: 'var(--theme-primary)' }"
+            @click="markAnnouncementRead"
+          >
+            我知道了
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1069,5 +1075,37 @@ async function copyToken() {
 
 .dark\:bg-green-900\/10 {
   background-color: color-mix(in srgb, var(--theme-primary) 15%, transparent) !important;
+}
+
+/* 公告查看弹窗可调整大小 */
+.announcement-view-modal {
+  min-width: 320px;
+  min-height: 200px;
+  width: 500px;
+  height: auto;
+  max-width: 90vw;
+  max-height: 90vh;
+  resize: both;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.announcement-view-modal > div {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.announcement-content {
+  flex: 1;
+  min-height: 80px;
+}
+
+/* 自定义调整大小手柄样式 */
+.announcement-view-modal::-webkit-resizer {
+  background: linear-gradient(-45deg, transparent 50%, var(--theme-primary) 50%, var(--theme-primary) 60%, transparent 60%, transparent 70%, var(--theme-primary) 70%, var(--theme-primary) 80%, transparent 80%);
+  border-radius: 0 0 12px 0;
 }
 </style>

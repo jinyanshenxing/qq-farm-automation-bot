@@ -80,29 +80,6 @@ export const useWxLoginStore = defineStore('wx-login', () => {
   // 获取二维码接口地址
   const qrEndpoint = 'LoginGetQRCar'
 
-  // 更新配置
-  async function updateConfig(newConfig: Partial<WxLoginConfig>) {
-    rawConfig.value = { ...rawConfig.value, ...newConfig }
-    await syncConfigToServer()
-  }
-
-  // 同步配置到服务器
-  async function syncConfigToServer() {
-    try {
-      await fetch('/api/user/wxlogin-config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-token': localStorage.getItem('admin_token') || '',
-        },
-        body: JSON.stringify(rawConfig.value),
-      })
-    }
-    catch (e) {
-      console.error('同步配置到服务器失败:', e)
-    }
-  }
-
   // 重置登录状态
   function resetState() {
     qrCode.value = null
@@ -358,7 +335,6 @@ export const useWxLoginStore = defineStore('wx-login', () => {
     qrEndpoint,
     currentUserId,
     useProxyMode,
-    updateConfig,
     resetState,
     getQRCode,
     checkLogin,

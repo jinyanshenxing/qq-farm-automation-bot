@@ -2,6 +2,12 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/api'
 
+export interface BlacklistItem {
+  gid: number
+  name: string
+  avatarUrl: string
+}
+
 export interface KnownFriendSettings {
   knownFriendGids: number[]
   knownFriendGidSyncCooldownSec: number
@@ -12,7 +18,7 @@ export const useFriendStore = defineStore('friend', () => {
   const loading = ref(false)
   const friendLands = ref<Record<string, any[]>>({})
   const friendLandsLoading = ref<Record<string, boolean>>({})
-  const blacklist = ref<number[]>([])
+  const blacklist = ref<BlacklistItem[]>([])
   const interactRecords = ref<any[]>([])
   const interactLoading = ref(false)
   const interactError = ref('')
@@ -23,14 +29,14 @@ export const useFriendStore = defineStore('friend', () => {
   const knownFriendSettingsSaving = ref(false)
 
   function buildPlantSummaryFromDetail(lands: any[], summary: any) {
-      let stealNum = 0
-      let dryNum = 0
-      let weedNum = 0
-      let insectNum = 0
+    let stealNum = 0
+    let dryNum = 0
+    let weedNum = 0
+    let insectNum = 0
 
-      const detailLands = Array.isArray(lands) ? lands : []
-      if (detailLands.length > 0) {
-          for (const land of detailLands) {
+    const detailLands = Array.isArray(lands) ? lands : []
+    if (detailLands.length > 0) {
+      for (const land of detailLands) {
         if (!land || !land.unlocked)
           continue
         if (land.status === 'stealable')
@@ -43,12 +49,12 @@ export const useFriendStore = defineStore('friend', () => {
           insectNum++
       }
     }
-      else {
-          stealNum = Array.isArray(summary?.stealable) ? summary.stealable.length : 0
-          dryNum = Array.isArray(summary?.needWater) ? summary.needWater.length : 0
-          weedNum = Array.isArray(summary?.needWeed) ? summary.needWeed.length : 0
-          insectNum = Array.isArray(summary?.needBug) ? summary.needBug.length : 0
-      }
+    else {
+      stealNum = Array.isArray(summary?.stealable) ? summary.stealable.length : 0
+      dryNum = Array.isArray(summary?.needWater) ? summary.needWater.length : 0
+      weedNum = Array.isArray(summary?.needWeed) ? summary.needWeed.length : 0
+      insectNum = Array.isArray(summary?.needBug) ? summary.needBug.length : 0
+    }
 
     return {
       stealNum: Number(stealNum) || 0,
@@ -89,30 +95,30 @@ export const useFriendStore = defineStore('friend', () => {
     }
   }
   async function fetchInteractRecords(accountId: string) {
-        if (!accountId)
-            return
-        interactLoading.value = true
-        interactError.value = ''
-        interactRecords.value = []
+    if (!accountId)
+      return
+    interactLoading.value = true
+    interactError.value = ''
+    interactRecords.value = []
 
-        try {
-            const res = await api.get('/api/interact-records', {
-                headers: { 'x-account-id': accountId },
-            })
-            if (res.data.ok) {
-                interactRecords.value = Array.isArray(res.data.data) ? res.data.data : []
-            }
-            else {
-                interactError.value = res.data.error || '加载访客记录失败'
-            }
-        }
-        catch (error: any) {
-            interactError.value = error?.response?.data?.error || error?.message || '加载访客记录失败'
-        }
-        finally {
-            interactLoading.value = false
-        }
+    try {
+      const res = await api.get('/api/interact-records', {
+        headers: { 'x-account-id': accountId },
+      })
+      if (res.data.ok) {
+        interactRecords.value = Array.isArray(res.data.data) ? res.data.data : []
+      }
+      else {
+        interactError.value = res.data.error || '加载访客记录失败'
+      }
     }
+    catch (error: any) {
+      interactError.value = error?.response?.data?.error || error?.message || '加载访客记录失败'
+    }
+    finally {
+      interactLoading.value = false
+    }
+  }
 
   async function fetchBlacklist(accountId: string) {
     if (!accountId)
@@ -186,7 +192,8 @@ export const useFriendStore = defineStore('friend', () => {
   }
 
   function applyKnownFriendSettings(data: KnownFriendSettings | null | undefined) {
-    if (!data) return
+    if (!data)
+      return
     knownFriendGids.value = Array.isArray(data.knownFriendGids) ? data.knownFriendGids : []
     knownFriendGidSyncCooldownSec.value = Number.isFinite(data.knownFriendGidSyncCooldownSec)
       ? Math.max(30, Math.min(86400, data.knownFriendGidSyncCooldownSec))

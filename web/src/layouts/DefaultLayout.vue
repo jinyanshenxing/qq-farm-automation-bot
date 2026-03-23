@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
+import { onMounted, onUnmounted } from 'vue'
 import Sidebar from '@/components/Sidebar.vue'
 import { useAppStore } from '@/stores/app'
 
@@ -93,7 +93,8 @@ onUnmounted(() => {
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0);
   }
   50% {

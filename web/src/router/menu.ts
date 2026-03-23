@@ -37,13 +37,6 @@ export const menuRoutes: MenuItem[] = [
     component: () => import('@/views/Analytics.vue'),
   },
   {
-    path: 'accounts',
-    name: 'accounts',
-    label: '账号',
-    icon: 'i-carbon-user-settings',
-    component: () => import('@/views/Accounts.vue'),
-  },
-  {
     path: 'settings',
     name: 'Settings',
     label: '设置',
@@ -51,19 +44,11 @@ export const menuRoutes: MenuItem[] = [
     component: () => import('@/views/Settings.vue'),
   },
   {
-    path: 'cards',
-    name: 'cards',
-    label: '卡密管理',
-    icon: 'i-carbon-ticket',
-    component: () => import('@/views/CardManagement.vue'),
-    adminOnly: true,
-  },
-  {
-    path: 'users',
-    name: 'users',
-    label: '用户管理',
-    icon: 'i-carbon-user-admin',
-    component: () => import('@/views/UserManagement.vue'),
+    path: 'admin',
+    name: 'admin',
+    label: '后台',
+    icon: 'i-carbon-settings-adjust',
+    component: () => import('@/views/AdminPanel.vue'),
     adminOnly: true,
   },
 ]

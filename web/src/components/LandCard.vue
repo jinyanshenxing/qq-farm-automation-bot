@@ -92,8 +92,8 @@ function getPlantSizeText(land: any) {
       #{{ land.id }}
     </div>
     <div
-        v-if="land.plantSize > 1"
-        class="absolute right-1 top-1 rounded bg-pink-100 px-1 py-0.5 text-[10px] text-pink-700 dark:bg-pink-900/30 dark:text-pink-300"
+      v-if="land.plantSize > 1"
+      class="absolute right-1 top-1 rounded bg-pink-100 px-1 py-0.5 text-[10px] text-pink-700 dark:bg-pink-900/30 dark:text-pink-300"
     >
       合种 {{ getPlantSizeText(land) }}
     </div>
@@ -121,13 +121,13 @@ function getPlantSizeText(land: any) {
       </span>
     </div>
 
-<!--    <div class="mb-1 text-[10px] text-gray-400">-->
+    <!--    <div class="mb-1 text-[10px] text-gray-400"> -->
     <div class="text-[10px] text-gray-400">
       {{ getLandTypeName(land.level) }}
     </div>
 
     <div class="mb-1 text-[10px] text-gray-400">
-      季数 {{ land.totalSeason > 0 ? (land.currentSeason + '/' + land.totalSeason) : '-/-' }}
+      季数 {{ land.totalSeason > 0 ? (`${land.currentSeason}/${land.totalSeason}`) : '-/-' }}
     </div>
 
     <!-- Status Badges -->
