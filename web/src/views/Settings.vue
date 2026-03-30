@@ -213,7 +213,6 @@ const localStrategySettings = ref({
   stealDelaySeconds: 0,
   plantOrderRandom: false,
   plantDelaySeconds: 0,
-  fastHarvestAdvanceMs: 200,
   intervals: { farmMin: 2, farmMax: 5, helpMin: 10, helpMax: 15, stealMin: 10, stealMax: 15 },
   friendQuietHours: { enabled: false, start: '23:00', end: '07:00' },
 })
@@ -449,7 +448,6 @@ function syncLocalStrategySettings() {
       stealDelaySeconds: settings.value.stealDelaySeconds ?? 0,
       plantOrderRandom: !!settings.value.plantOrderRandom,
       plantDelaySeconds: settings.value.plantDelaySeconds ?? 0,
-      fastHarvestAdvanceMs: settings.value.fastHarvestAdvanceMs ?? 200,
       intervals: settings.value.intervals,
       friendQuietHours: settings.value.friendQuietHours,
     }))
@@ -534,16 +532,19 @@ const localAutomationSettings = ref({
     friend_bad: false,
     friend_help_exp_limit: false,
     fertilizer_gift: false,
-    fertilizer_buy: false,
+    fertilizer_buy_organic: false,
+    fertilizer_buy_normal: false,
     fertilizer: 'normal',
     skip_own_weed_bug: false,
-    fast_harvest: false,
     fertilizer_multi_season: false,
     fertilizer_land_types: [...allFertilizerLandTypes],
     fertilizer_smart_seconds: 300,
   },
-  fertilizerBuyType: 'inorganic',
-  fertilizerBuyCount: 10,
+  fertilizerBuyOrganicCount: 10,
+  fertilizerBuyOrganicThresholdHours: 10,
+  fertilizerBuyNormalCount: 10,
+  fertilizerBuyNormalThresholdHours: 10,
+  fertilizerBuyCheckIntervalMinutes: 30,
 })
 
 const fertilizerOptions = [
@@ -552,11 +553,6 @@ const fertilizerOptions = [
   { label: '仅普通化肥', value: 'normal' },
   { label: '仅有机化肥', value: 'organic' },
   { label: '不施肥', value: 'none' },
-]
-
-const fertilizerBuyTypeOptions = [
-  { label: '有机化肥', value: 'organic' },
-  { label: '无机化肥', value: 'normal' },
 ]
 
 function syncLocalAutomationSettings() {
@@ -574,10 +570,10 @@ function syncLocalAutomationSettings() {
         friend_bad: false,
         friend_help_exp_limit: false,
         fertilizer_gift: false,
-        fertilizer_buy: false,
+        fertilizer_buy_organic: false,
+        fertilizer_buy_normal: false,
         fertilizer: 'none',
         skip_own_weed_bug: false,
-        fast_harvest: false,
         fertilizer_multi_season: false,
         fertilizer_land_types: [...allFertilizerLandTypes],
         fertilizer_smart_seconds: 300,
@@ -596,10 +592,10 @@ function syncLocalAutomationSettings() {
         friend_bad: false,
         friend_help_exp_limit: false,
         fertilizer_gift: false,
-        fertilizer_buy: false,
+        fertilizer_buy_organic: false,
+        fertilizer_buy_normal: false,
         fertilizer: 'none',
         skip_own_weed_bug: false,
-        fast_harvest: false,
         fertilizer_multi_season: false,
         fertilizer_land_types: [...allFertilizerLandTypes],
         fertilizer_smart_seconds: 300,
@@ -613,8 +609,11 @@ function syncLocalAutomationSettings() {
     if (localAutomationSettings.value.automation.fertilizer_smart_seconds === undefined) {
       localAutomationSettings.value.automation.fertilizer_smart_seconds = 300
     }
-    localAutomationSettings.value.fertilizerBuyType = settings.value.fertilizerBuyType ?? 'organic'
-    localAutomationSettings.value.fertilizerBuyCount = settings.value.fertilizerBuyCount ?? 0
+    localAutomationSettings.value.fertilizerBuyOrganicCount = settings.value.fertilizerBuyOrganicCount ?? 10
+    localAutomationSettings.value.fertilizerBuyOrganicThresholdHours = settings.value.fertilizerBuyOrganicThresholdHours ?? 10
+    localAutomationSettings.value.fertilizerBuyNormalCount = settings.value.fertilizerBuyNormalCount ?? 10
+    localAutomationSettings.value.fertilizerBuyNormalThresholdHours = settings.value.fertilizerBuyNormalThresholdHours ?? 10
+    localAutomationSettings.value.fertilizerBuyCheckIntervalMinutes = settings.value.fertilizerBuyCheckIntervalMinutes ?? 30
   }
 }
 
@@ -626,29 +625,38 @@ async function saveAutomationSettings() {
     const fullSettings = {
       ...settings.value,
       automation: localAutomationSettings.value.automation,
-      fertilizerBuyType: localAutomationSettings.value.fertilizerBuyType,
-      fertilizerBuyCount: localAutomationSettings.value.fertilizerBuyCount,
+      fertilizerBuyOrganicCount: localAutomationSettings.value.fertilizerBuyOrganicCount,
+      fertilizerBuyOrganicThresholdHours: localAutomationSettings.value.fertilizerBuyOrganicThresholdHours,
+      fertilizerBuyNormalCount: localAutomationSettings.value.fertilizerBuyNormalCount,
+      fertilizerBuyNormalThresholdHours: localAutomationSettings.value.fertilizerBuyNormalThresholdHours,
+      fertilizerBuyCheckIntervalMinutes: localAutomationSettings.value.fertilizerBuyCheckIntervalMinutes,
     }
     const res = await settingStore.saveSettings(currentAccountId.value, fullSettings)
     if (res.ok) {
       showAlert('自动控制设置已保存', 'primary')
 
-      if (localAutomationSettings.value.automation.fertilizer_buy) {
+      // 如果启用了自动购买化肥，立即检测并购买
+      if (localAutomationSettings.value.automation.fertilizer_buy_organic || localAutomationSettings.value.automation.fertilizer_buy_normal) {
         try {
-          const fertilizerType = localAutomationSettings.value.fertilizerBuyType || 'organic'
-          const fertilizerCount = localAutomationSettings.value.fertilizerBuyCount || 0
-          await api.post('/api/fertilizer/buy', {
-            type: fertilizerType,
-            count: fertilizerCount,
+          const buyRes = await api.post('/api/fertilizer/check-and-buy', {
+            buyOrganic: localAutomationSettings.value.automation.fertilizer_buy_organic,
+            buyNormal: localAutomationSettings.value.automation.fertilizer_buy_normal,
+            organicCount: localAutomationSettings.value.fertilizerBuyOrganicCount,
+            organicThresholdHours: localAutomationSettings.value.fertilizerBuyOrganicThresholdHours,
+            normalCount: localAutomationSettings.value.fertilizerBuyNormalCount,
+            normalThresholdHours: localAutomationSettings.value.fertilizerBuyNormalThresholdHours,
           }, {
             headers: { 'x-account-id': currentAccountId.value },
           })
-
-          localAutomationSettings.value.automation.fertilizer_buy = false
-          await settingStore.saveSettings(currentAccountId.value, fullSettings)
+          if (buyRes.data?.ok) {
+            const totalBought = (buyRes.data.organicBought || 0) + (buyRes.data.normalBought || 0)
+            if (totalBought > 0) {
+              showAlert(`已自动购买 ${totalBought} 个化肥`, 'primary')
+            }
+          }
         }
         catch (e) {
-          console.error('购买化肥失败', e)
+          console.error('检测购买化肥失败', e)
         }
       }
     }
@@ -857,11 +865,11 @@ async function handleTestOffline() {
       <div class="p-4">
         <!-- 账号管理 -->
         <div v-if="activeTab === 'account'" class="space-y-4">
-          <div class="flex items-center justify-between">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h3 class="text-lg text-gray-900 font-bold dark:text-gray-100">
               账号管理
             </h3>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
               <BaseButton
                 v-if="userStore.isAdmin"
                 variant="secondary"
@@ -870,7 +878,9 @@ async function handleTestOffline() {
                 @click="openClearStoppedConfirm"
               >
                 <div class="i-carbon-trash-can mr-2" />
-                一键清理 ({{ stoppedAccountsCount }})
+                <span class="hidden sm:inline">一键清理</span>
+                <span class="sm:hidden">清理</span>
+                ({{ stoppedAccountsCount }})
               </BaseButton>
               <BaseButton
                 variant="primary"
@@ -906,11 +916,11 @@ async function handleTestOffline() {
             </BaseButton>
           </div>
 
-          <div v-else class="grid grid-cols-1 items-start gap-4 lg:grid-cols-6 sm:grid-cols-2 md:grid-cols-3">
+          <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <div
               v-for="acc in accounts"
               :key="acc.id"
-              class="cursor-pointer border rounded-lg bg-white p-4 shadow transition-all duration-200 dark:bg-gray-800"
+              class="cursor-pointer border rounded-lg bg-white p-3 shadow transition-all duration-200 dark:bg-gray-800 sm:p-4"
               :class="String(currentAccountId) === String(acc.id)
                 ? 'ring-2'
                 : 'border-transparent'"
@@ -919,35 +929,39 @@ async function handleTestOffline() {
                 : {}"
               @click="selectAccount(acc)"
             >
-              <div class="mb-4 flex items-start justify-between">
-                <div class="flex items-center gap-3">
-                  <div class="h-12 w-12 flex items-center justify-center overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div class="flex min-w-0 flex-1 items-center gap-3">
+                  <div class="h-10 w-10 flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700 sm:h-12 sm:w-12">
                     <img v-if="acc.uin" :src="`https://q1.qlogo.cn/g?b=qq&nk=${acc.uin}&s=100`" class="h-full w-full object-cover">
-                    <div v-else class="i-carbon-user text-2xl text-gray-400" />
+                    <div v-else class="i-carbon-user text-xl text-gray-400 sm:text-2xl" />
                   </div>
-                  <div>
-                    <h4 class="text-lg font-bold">
+                  <div class="min-w-0 flex-1">
+                    <h4 class="truncate text-base font-bold sm:text-lg">
                       {{ acc.name || acc.nick || acc.id }}
                     </h4>
-                    <div class="mt-0.5 flex items-center gap-1.5">
+                    <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
                       <span
                         v-if="acc.platform"
-                        class="rounded px-1 py-0.2 text-[10px] font-medium leading-tight"
+                        class="rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight"
                         :class="getPlatformClass(acc.platform)"
                       >
                         {{ getPlatformLabel(acc.platform) }}
                       </span>
-                      <span class="text-sm text-gray-500">
+                      <span class="truncate text-xs text-gray-500 sm:text-sm">
                         {{ acc.uin || '未绑定' }}
                       </span>
                     </div>
                   </div>
                 </div>
-                <div class="flex flex-col items-end gap-2">
+                <div class="flex items-center justify-end gap-2 sm:flex-col sm:items-end">
+                  <span class="flex items-center gap-1 text-xs text-gray-500 sm:hidden">
+                    <div class="h-2 w-2 rounded-full" :class="acc.running ? 'bg-green-500' : 'bg-gray-300'" />
+                    {{ acc.running ? '运行中' : '已停止' }}
+                  </span>
                   <BaseButton
                     variant="secondary"
                     size="sm"
-                    class="w-20 border rounded-full shadow-sm transition-all duration-500 ease-in-out active:scale-95"
+                    class="border rounded-full shadow-sm transition-all duration-500 ease-in-out active:scale-95 sm:w-20"
                     :class="acc.running ? 'border-red-200 bg-red-50 text-red-600 hover:bg-red-100 focus:ring-red-500 active:border-red-300 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30 dark:focus:ring-red-500 dark:active:border-red-700' : 'border-green-200 bg-green-50 text-green-600 hover:bg-green-100 focus:ring-green-500 active:border-green-300 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30 dark:focus:ring-green-500 dark:active:border-green-700'"
                     :disabled="!acc.running && isAccountOpsDisabled"
                     :title="!acc.running && isAccountOpsDisabled ? '账号已到期，无法启动账号' : ''"
@@ -959,18 +973,18 @@ async function handleTestOffline() {
                 </div>
               </div>
 
-              <div class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-gray-700">
-                <div class="flex items-center gap-2 text-sm text-gray-500">
+              <div class="mt-3 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-gray-700 sm:mt-4 sm:pt-4">
+                <div class="hidden items-center gap-2 text-sm text-gray-500 sm:flex">
                   <span class="flex items-center gap-1">
                     <div class="h-2 w-2 rounded-full" :class="acc.running ? 'bg-green-500' : 'bg-gray-300'" />
                     {{ acc.running ? '运行中' : '已停止' }}
                   </span>
                 </div>
 
-                <div class="flex gap-2">
+                <div class="flex flex-1 justify-end gap-1 sm:flex-initial sm:gap-2">
                   <BaseButton
                     variant="ghost"
-                    class="!p-2"
+                    class="min-h-[36px] min-w-[36px] !p-2"
                     title="设置"
                     @click="openSettings(acc)"
                   >
@@ -978,7 +992,7 @@ async function handleTestOffline() {
                   </BaseButton>
                   <BaseButton
                     variant="ghost"
-                    class="!p-2"
+                    class="min-h-[36px] min-w-[36px] !p-2"
                     title="编辑"
                     @click="openEditModal(acc)"
                   >
@@ -986,7 +1000,7 @@ async function handleTestOffline() {
                   </BaseButton>
                   <BaseButton
                     variant="ghost"
-                    class="text-red-500 !p-2 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300"
+                    class="text-red-500 min-h-[36px] min-w-[36px] !p-2 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300"
                     title="删除"
                     @click="handleDelete(acc)"
                   >
@@ -1248,31 +1262,6 @@ async function handleTestOffline() {
               </div>
             </div>
 
-            <div class="border-t pt-4 space-y-3 dark:border-gray-700">
-              <h4 class="text-sm text-gray-700 font-medium dark:text-gray-300">
-                秒收取设置
-              </h4>
-              <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <BaseSwitch v-model="localAutomationSettings.automation.fast_harvest" label="启用秒收取" />
-                <div class="col-span-2 flex items-center text-xs text-gray-500 dark:text-gray-400">
-                  <span>作物成熟前提前发起收获请求，减少被偷概率</span>
-                </div>
-              </div>
-              <div v-if="localAutomationSettings.automation.fast_harvest" class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <BaseInput
-                  v-model.number="localStrategySettings.fastHarvestAdvanceMs"
-                  label="提前时间 (毫秒)"
-                  type="number"
-                  min="50"
-                  max="1000"
-                  placeholder="200"
-                />
-                <div class="flex items-center text-xs text-gray-500 dark:text-gray-400">
-                  <span>建议值：200ms，范围 50-1000ms</span>
-                </div>
-              </div>
-            </div>
-
             <div class="flex justify-end gap-2 border-t pt-3 dark:border-gray-700">
               <BaseButton
                 variant="primary"
@@ -1316,26 +1305,65 @@ async function handleTestOffline() {
               <BaseSwitch v-model="localAutomationSettings.automation.farm_push" label="推送触发巡田" />
               <BaseSwitch v-model="localAutomationSettings.automation.land_upgrade" label="自动升级土地" />
               <BaseSwitch v-model="localAutomationSettings.automation.fertilizer_gift" label="自动填充化肥" />
-              <BaseSwitch v-model="localAutomationSettings.automation.fertilizer_buy" label="自动购买化肥" />
-              <BaseSwitch v-model="localAutomationSettings.automation.skip_own_weed_bug" label="不除自己草虫" />
-            </div>
+            <BaseSwitch v-model="localAutomationSettings.automation.fertilizer_buy_organic" label="自动购买有机化肥" />
+            <BaseSwitch v-model="localAutomationSettings.automation.fertilizer_buy_normal" label="自动购买无机化肥" />
+            <BaseSwitch v-model="localAutomationSettings.automation.skip_own_weed_bug" label="不除自己草虫" />
+          </div>
 
-            <div v-if="localAutomationSettings.automation.fertilizer_buy" class="flex flex-wrap gap-4 rounded bg-green-50 p-3 text-sm dark:bg-green-900/20">
-              <BaseSelect
-                v-model="localAutomationSettings.fertilizerBuyType"
-                label="化肥类型"
-                :options="fertilizerBuyTypeOptions"
-              />
+          <div v-if="localAutomationSettings.automation.fertilizer_buy_organic || localAutomationSettings.automation.fertilizer_buy_normal" class="space-y-3 rounded bg-green-50 p-3 text-sm dark:bg-green-900/20">
+            <div v-if="localAutomationSettings.automation.fertilizer_buy_organic" class="space-y-2">
+              <div class="font-medium text-green-700 dark:text-green-400">有机化肥设置</div>
+              <div class="flex flex-wrap gap-4">
+                <BaseInput
+                  v-model.number="localAutomationSettings.fertilizerBuyOrganicCount"
+                  label="购买数量"
+                  type="number"
+                  min="1"
+                  max="10000"
+                />
+                <BaseInput
+                  v-model.number="localAutomationSettings.fertilizerBuyOrganicThresholdHours"
+                  label="触发阈值 (小时)"
+                  type="number"
+                  min="1"
+                  max="990"
+                />
+              </div>
+            </div>
+            <div v-if="localAutomationSettings.automation.fertilizer_buy_normal" class="space-y-2">
+              <div class="font-medium text-green-700 dark:text-green-400">无机化肥设置</div>
+              <div class="flex flex-wrap gap-4">
+                <BaseInput
+                  v-model.number="localAutomationSettings.fertilizerBuyNormalCount"
+                  label="购买数量"
+                  type="number"
+                  min="1"
+                  max="10000"
+                />
+                <BaseInput
+                  v-model.number="localAutomationSettings.fertilizerBuyNormalThresholdHours"
+                  label="触发阈值 (小时)"
+                  type="number"
+                  min="1"
+                  max="990"
+                />
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-4">
               <BaseInput
-                v-model.number="localAutomationSettings.fertilizerBuyCount"
-                label="购买数量 (0=不限)"
+                v-model.number="localAutomationSettings.fertilizerBuyCheckIntervalMinutes"
+                label="检测间隔 (分钟)"
                 type="number"
-                min="0"
-                max="10000"
+                min="1"
+                max="1440"
               />
             </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              系统会按照设定的检测间隔定时检测化肥容器剩余量，当低于触发阈值时自动购买。保存设置后会立即检测一次。同时开启两种化肥购买时，优先购买有机化肥。
+            </p>
+          </div>
 
-            <div v-if="localAutomationSettings.automation.friend" class="flex flex-wrap gap-4 rounded bg-blue-50 p-3 text-sm dark:bg-blue-900/20">
+          <div v-if="localAutomationSettings.automation.friend" class="flex flex-wrap gap-4 rounded bg-blue-50 p-3 text-sm dark:bg-blue-900/20">
               <BaseSwitch v-model="localAutomationSettings.automation.friend_steal" label="自动偷菜" />
               <BaseSwitch v-model="localAutomationSettings.automation.friend_help" label="自动帮忙" />
               <BaseSwitch v-model="localAutomationSettings.automation.friend_bad" label="自动捣乱" />

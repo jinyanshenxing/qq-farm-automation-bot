@@ -8,7 +8,7 @@
 - 建议自己拉项目部署，没有测试过打包的Windows端和Mac端，docker后续整！
 - 更新优化日志详见update.log 感谢支持，喜欢的点一个start吧！
 - 默认账号密码都是admin，端口3007，请部署登录后尽快修改密码！
-### 官方对脚本进行了毁灭性打击，最后一个版本是之前写的了，刚好就一起上传完归档了，山水相逢终有时,有缘相聚皆可期，感谢大家这些天的支持，后会有期！
+## QQ通过抓包code登陆，微信提供了可视化接口配置，自己部署协议或者找三方API，并不是内置了微信扫码登陆
 ## 技术栈
 
 **后端**
@@ -34,13 +34,14 @@
 
 ## 功能特性
 ### 功能截图
-<img src="https://picui.ogmua.cn/s1/2026/03/08/69ad4e2b4a55b.webp"  alt="图片失效"/>
-<img src="https://picui.ogmua.cn/s1/2026/03/08/69ad4e2b4b222.webp"  alt="图片失效"/>
-<img src="https://picui.ogmua.cn/s1/2026/03/09/69aecda38dabc.webp"  alt="图片失效"/>
+<img src="https://free.picui.cn/free/2026/03/27/69c638ef27e36.png"  alt="图片失效"/>
+<img src="https://free.picui.cn/free/2026/03/27/69c638eff412b.png"  alt="图片失效"/>
+<img src="https://free.picui.cn/free/2026/03/27/69c638f005734.png"  alt="图片失效"/>
+<img src="https://free.picui.cn/free/2026/03/27/69c638f02d18d.png"  alt="图片失效"/>
 
 ### 多账号管理
 - 账号新增、编辑、删除、启动、停止
-- 扫码登录（QQ）与手动输入 Code
+- QQ只能抓包code，微信提供了可视化接口配置，自己部署协议或者找三方API，并不是内置了微信扫码登陆
 - 账号被踢下线自动删除
 - 账号连续离线超时自动删除
 - 账号离线推送通知（支持 Bark、自定义 Webhook 等）
@@ -97,7 +98,7 @@ pnpm dev:core
 ### Linux（Ubuntu/Debian）
 建议使用宝塔最为便捷，在网站其他项目选项中按照如图所示去部署即可
 
-<img src="https://picui.ogmua.cn/s1/2026/03/08/69ad661353590.webp"  alt="图片失效"/>
+<img src="https://free.picui.cn/free/2026/03/27/69c6398dd326c.png"  alt="图片失效"/>
 
 启动后访问面板：
 - 本机：`http://localhost:3007`
